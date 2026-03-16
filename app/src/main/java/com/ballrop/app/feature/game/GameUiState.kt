@@ -28,6 +28,7 @@ data class GameUiState(
     val balls: List<BallItem> = emptyList(),
     val feedbackPopups: List<GameFeedbackPopup> = emptyList(),
     val feedbackEvents: List<GameFeedbackEvent> = emptyList(),
+    val impactOverlay: GameImpactOverlay? = null,
     val sessionSummary: GameSessionSummary = GameSessionSummary()
 ) {
     val totalMistakes: Int

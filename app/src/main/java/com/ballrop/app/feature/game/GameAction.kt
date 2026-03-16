@@ -33,4 +33,7 @@ sealed interface GameAction {
     data object TryAgain : GameAction
     data class StartFromLevel(val level: Int) : GameAction
 
+
+    //DEBUG
+    data object DebugAddLives : GameAction
 }

@@ -42,6 +42,44 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.runtime.mutableFloatStateOf
+
+import com.ballrop.app.feature.game.components.GameDebugPanel
+
+
+import androidx.compose.ui.text.font.FontWeight
+import com.ballrop.app.core.feedback.GameFeedbackType
+
+
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.border
+
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.graphicsLayer
+
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.foundation.layout.size
+import kotlin.math.cos
+import kotlin.math.sin
+
+
+
+
+
+
+private const val DEBUG_PANEL_ENABLED = true
+
 @Composable
 fun GameScreen(
     startLevel: Int,
@@ -51,6 +89,9 @@ fun GameScreen(
 
     val progressStorage = remember { GameProgressStorage(context) }
     var checkpointStartLevel by remember { mutableIntStateOf(1) }
+
+    var debugPanelOffsetX by remember { mutableFloatStateOf(0f) }
+    var debugPanelOffsetY by remember { mutableFloatStateOf(0f) }
 
     val feedbackManager: GameFeedbackManager = remember {
         AndroidGameFeedbackManager(context)
@@ -77,6 +118,9 @@ fun GameScreen(
             if (completedLevel % 3 == 0) {
                 val nextCheckpointStartLevel = completedLevel + 1
                 progressStorage.saveCheckpointStartLevel(nextCheckpointStartLevel)
+                checkpointStartLevel = nextCheckpointStartLevel
+            } else {
+                checkpointStartLevel = progressStorage.getCheckpointStartLevel()
             }
         }
     }
@@ -192,38 +236,61 @@ fun GameScreen(
 
                 FeedbackPopups(uiState = uiState)
 
+                ImpactOverlay(
+                    impactOverlay = uiState.impactOverlay
+                )
+
                 when (uiState.status) {
-                    GameStatus.LEVEL_COMPLETED -> {
-                        LevelCompleteOverlay(
-                            uiState = uiState,
-                            onContinueClick = {
-                                controller.onAction(GameAction.NextLevel)
+                    GameStatus.PAUSED -> {
+                        PauseOverlay(
+                            checkpointStartLevel = checkpointStartLevel,
+                            onResumeClick = {
+                                controller.onAction(GameAction.ResumeGame)
+                            },
+                            onRestartClick = {
+                                val restartLevel = checkpointStartLevel.coerceAtLeast(1)
+                                controller.onAction(GameAction.StartFromLevel(restartLevel))
                                 controller.onAction(GameAction.StartGame)
                             },
                             onExitToMenuClick = onExitToMenu
                         )
                     }
 
-                    GameStatus.PAUSED -> {
-                        PauseOverlay(
-                            onResumeClick = {
-                                controller.onAction(GameAction.ResumeGame)
-                            },
-                            onRestartClick = {
-                                controller.onAction(GameAction.ResetGame)
+                    GameStatus.LEVEL_COMPLETED -> {
+                        LevelCompleteOverlay(
+                            uiState = uiState,
+                            checkpointInfo = buildCheckpointInfo(
+                                completedLevel = uiState.currentLevel,
+                                savedCheckpointStartLevel = checkpointStartLevel
+                            ),
+                            onContinueClick = {
+                                if (uiState.currentLevel % 3 == 0) {
+                                    val nextCheckpointStartLevel = uiState.currentLevel + 1
+                                    progressStorage.saveCheckpointStartLevel(nextCheckpointStartLevel)
+                                    checkpointStartLevel = nextCheckpointStartLevel
+                                }
+
+                                controller.onAction(GameAction.NextLevel)
                                 controller.onAction(GameAction.StartGame)
                             },
-                            onExitToMenuClick = onExitToMenu
+                            onExitToMenuClick = {
+                                if (uiState.currentLevel % 3 == 0) {
+                                    val nextCheckpointStartLevel = uiState.currentLevel + 1
+                                    progressStorage.saveCheckpointStartLevel(nextCheckpointStartLevel)
+                                    checkpointStartLevel = nextCheckpointStartLevel
+                                }
+
+                                onExitToMenu()
+                            }
                         )
                     }
 
                     GameStatus.GAME_OVER -> {
                         GameOverOverlay(
                             uiState = uiState,
+                            checkpointStartLevel = checkpointStartLevel,
                             onRestartClick = {
-                                val restartLevel = progressStorage.getCheckpointStartLevel()
-                                    .coerceAtLeast(1)
-
+                                val restartLevel = checkpointStartLevel.coerceAtLeast(1)
                                 controller.onAction(GameAction.StartFromLevel(restartLevel))
                                 controller.onAction(GameAction.StartGame)
                             },
@@ -232,6 +299,41 @@ fun GameScreen(
                     }
 
                     else -> Unit
+                }
+                if (DEBUG_PANEL_ENABLED) {
+                    GameDebugPanel(
+                        currentLevel = uiState.currentLevel,
+                        remainingLives = uiState.remainingLives,
+                        checkpointStartLevel = checkpointStartLevel,
+                        panelOffsetX = debugPanelOffsetX,
+                        panelOffsetY = debugPanelOffsetY,
+                        onPanelDrag = { dragX, dragY ->
+                            debugPanelOffsetX += dragX
+                            debugPanelOffsetY += dragY
+                        },
+                        onNextLevelClick = {
+                            val nextLevel = uiState.currentLevel + 1
+                            val debugCheckpointStartLevel = calculateCheckpointStartLevelForLevel(nextLevel)
+
+                            progressStorage.saveCheckpointStartLevel(debugCheckpointStartLevel)
+                            checkpointStartLevel = debugCheckpointStartLevel
+
+                            controller.onAction(GameAction.NextLevel)
+                            controller.onAction(GameAction.StartGame)
+                        },
+                        onAddLivesClick = {
+                            controller.onAction(GameAction.DebugAddLives)
+                        },
+                        onRestartFromCheckpointClick = {
+                            val restartLevel = checkpointStartLevel.coerceAtLeast(1)
+
+                            controller.onAction(GameAction.StartFromLevel(restartLevel))
+                            controller.onAction(GameAction.StartGame)
+                        },
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(BallropDimens.Space12)
+                    )
                 }
             }
         }
@@ -243,31 +345,15 @@ private fun GameTopBar(
     uiState: GameUiState,
     onPauseClick: () -> Unit
 ) {
-    val tempoLabel = when {
-        uiState.levelProgress < uiState.levelConfig.introProgressThreshold -> "Rahat Başlangıç"
-        uiState.levelProgress < uiState.levelConfig.rushProgressThreshold -> "Baskı Artıyor"
-        else -> "Yoğun Tempo"
-    }
-
-    val remainingForLevel = (
-            uiState.levelConfig.targetCorrectCount - uiState.correctPlacedCount
-            ).coerceAtLeast(0)
-
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(BallropDimens.Space12)
+        verticalArrangement = Arrangement.spacedBy(BallropDimens.Space8)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(BallropDimens.Space12),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            InfoCard(
-                title = "Skor",
-                value = uiState.score.toString(),
-                modifier = Modifier.weight(1f)
-            )
-
             InfoCard(
                 title = "Level",
                 value = uiState.currentLevel.toString(),
@@ -289,47 +375,9 @@ private fun GameTopBar(
             )
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(BallropDimens.Space12)
-        ) {
-            InfoCard(
-                title = "Hedef",
-                value = "${uiState.correctPlacedCount}/${uiState.levelConfig.targetCorrectCount}",
-                modifier = Modifier.weight(1f)
-            )
-
-            InfoCard(
-                title = "Combo",
-                value = if (uiState.comboCount > 0) "x${uiState.comboCount}" else "-",
-                modifier = Modifier.weight(1f),
-                highlighted = uiState.comboCount >= 2
-            )
-
-            InfoCard(
-                title = "En İyi",
-                value = if (uiState.bestCombo > 0) "x${uiState.bestCombo}" else "-",
-                modifier = Modifier.weight(1f)
-            )
-        }
-
         Text(
-            text = "Tempo: $tempoLabel",
+            text = "Skor ${uiState.score}",
             style = MaterialTheme.typography.labelLarge,
-            color = BallropColors.TextSecondary,
-            modifier = Modifier.padding(start = BallropDimens.Space4)
-        )
-
-        Text(
-            text = "Bonus topu yakala, tehlikeli toptan kaçın.",
-            style = MaterialTheme.typography.labelMedium,
-            color = BallropColors.TextSecondary,
-            modifier = Modifier.padding(start = BallropDimens.Space4)
-        )
-
-        Text(
-            text = "Level için kalan: $remainingForLevel doğru",
-            style = MaterialTheme.typography.labelMedium,
             color = BallropColors.TextSecondary,
             modifier = Modifier.padding(start = BallropDimens.Space4)
         )
@@ -433,104 +481,120 @@ private fun FeedbackPopups(
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         uiState.feedbackPopups.forEach { popup ->
-            Text(
-                text = popup.text,
+            val chipColor = when {
+                popup.isCombo -> BallropColors.Warning.copy(alpha = 0.92f)
+                popup.isPositive -> BallropColors.Success.copy(alpha = 0.92f)
+                else -> BallropColors.Error.copy(alpha = 0.92f)
+            }
+
+            val textColor = BallropColors.White
+
+            Box(
                 modifier = Modifier
                     .graphicsLayer {
                         translationX = if (popup.isCombo) {
-                            popup.x - 88f
+                            popup.x - 86f
                         } else {
-                            popup.x - 34f
+                            popup.x - 42f
                         }
 
                         translationY = popup.y
                         alpha = popup.alpha
                     }
-                    .scale(popup.scale),
-                style = if (popup.isCombo) {
-                    MaterialTheme.typography.headlineSmall
-                } else {
-                    MaterialTheme.typography.titleLarge
-                },
-                textAlign = TextAlign.Center,
-                color = when {
-                    popup.isCombo -> BallropColors.Warning
-                    popup.isPositive -> BallropColors.Success
-                    else -> BallropColors.Error
-                }
-            )
+                    .scale(popup.scale)
+                    .background(
+                        color = chipColor,
+                        shape = RoundedCornerShape(999.dp)
+                    )
+                    .padding(
+                        horizontal = if (popup.isCombo) 14.dp else 12.dp,
+                        vertical = if (popup.isCombo) 8.dp else 6.dp
+                    )
+            ) {
+                Text(
+                    text = popup.text,
+                    style = if (popup.isCombo) {
+                        MaterialTheme.typography.titleMedium
+                    } else {
+                        MaterialTheme.typography.labelLarge
+                    },
+                    textAlign = TextAlign.Center,
+                    color = textColor,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
     }
 }
 
 @Composable
+private fun ImpactOverlay(
+    impactOverlay: GameImpactOverlay?
+) {
+    if (impactOverlay == null) return
+
+    val color = when (impactOverlay.type) {
+        GameFeedbackType.CORRECT -> BallropColors.Success
+        GameFeedbackType.WRONG -> BallropColors.Error
+        GameFeedbackType.MISS -> BallropColors.Warning
+        GameFeedbackType.LEVEL_COMPLETE -> BallropColors.Warning
+        GameFeedbackType.GAME_OVER -> BallropColors.Error
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(color.copy(alpha = impactOverlay.alpha * 0.28f))
+    )
+}
+
+@Composable
 private fun LevelCompleteOverlay(
     uiState: GameUiState,
+    checkpointInfo: CheckpointInfo,
     onContinueClick: () -> Unit,
     onExitToMenuClick: () -> Unit
 ) {
-    val tone = buildLevelCompleteTone(uiState)
     val nextLevel = uiState.currentLevel + 1
-    val nextTarget = 20 + ((nextLevel - 1) * 2)
 
     CenterOverlayCard(
-        title = tone.title,
-        subtitle = tone.subtitle
+        title = "Level ${uiState.currentLevel} Tamamlandı",
+        isCelebration = true,
+        subtitle = if (checkpointInfo.unlockedNow) {
+            "Temiz geçtiysen ödülünü aldın. Yeni checkpoint hazır."
+        } else {
+            "Ritmi bozma. Sıradaki level daha hızlı gelecek."
+        }
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(BallropDimens.Space12)
-        ) {
-            SummaryCard(
-                title = "Skor",
-                value = uiState.score.toString(),
-                modifier = Modifier.weight(1f)
-            )
-
-            SummaryCard(
-                title = "Seri",
-                value = "x${uiState.bestCombo}",
-                modifier = Modifier.weight(1f)
-            )
-
-            SummaryCard(
-                title = "İsabet",
-                value = "%${uiState.accuracyPercent}",
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(BallropDimens.Space12)
-        ) {
-            SummaryCard(
-                title = "Geçilen",
-                value = "Level ${uiState.currentLevel}",
-                modifier = Modifier.weight(1f)
-            )
-
-            SummaryCard(
-                title = "Sonraki",
-                value = "Level $nextLevel",
-                modifier = Modifier.weight(1f)
-            )
-
-            SummaryCard(
-                title = "Yeni Hedef",
-                value = "$nextTarget doğru",
-                modifier = Modifier.weight(1f)
-            )
-        }
+        SummaryCard(
+            title = "Sıradaki Level",
+            value = nextLevel.toString(),
+            modifier = Modifier.fillMaxWidth()
+        )
 
         SummaryCard(
-            title = "Hazırlık",
-            value = "Sonraki levelde tempo biraz daha sert olacak. Ritmi erken kur.",
+            title = "Checkpoint",
+            value = if (checkpointInfo.unlockedNow) {
+                "Level ${checkpointInfo.resumeLevel} açıldı"
+            } else {
+                "Sonraki checkpoint için ${checkpointInfo.levelsUntilNextCheckpoint} level kaldı"
+            },
+            modifier = Modifier.fillMaxWidth(),
+            highlighted = checkpointInfo.unlockedNow
+        )
+
+        SummaryCard(
+            title = "Devam Bilgisi",
+            value = if (checkpointInfo.unlockedNow) {
+                "Kaybedersen Level ${checkpointInfo.resumeLevel} noktasından dönersin."
+            } else {
+                "Şimdilik eski checkpoint korunuyor. Devam edip yeni blok açman lazım."
+            },
             modifier = Modifier.fillMaxWidth()
         )
 
         OverlayButton(
-            text = "Sonraki Level",
+            text = "Devam Et",
             primary = true,
             onClick = onContinueClick
         )
@@ -545,14 +609,42 @@ private fun LevelCompleteOverlay(
 
 @Composable
 private fun PauseOverlay(
+    checkpointStartLevel: Int,
     onResumeClick: () -> Unit,
     onRestartClick: () -> Unit,
     onExitToMenuClick: () -> Unit
 ) {
+    val hasCheckpoint = checkpointStartLevel > 1
+
     CenterOverlayCard(
-        title = "OYUN DURAKLATILDI",
-        subtitle = "İstersen devam et, istersen sıfırdan başla."
+        title = "Duraklatıldı",
+        subtitle = if (hasCheckpoint) {
+            "İstersen checkpoint'ten devam edecek şekilde run'ı yeniden başlatabilirsin."
+        } else {
+            "Hazırsan kaldığın yerden devam et."
+        }
     ) {
+        SummaryCard(
+            title = "Devam Noktası",
+            value = if (hasCheckpoint) {
+                "Level $checkpointStartLevel"
+            } else {
+                "Level 1"
+            },
+            modifier = Modifier.fillMaxWidth(),
+            highlighted = hasCheckpoint
+        )
+
+        SummaryCard(
+            title = "Seçim",
+            value = if (hasCheckpoint) {
+                "Yeniden başlatırsan Level $checkpointStartLevel noktasından açılır."
+            } else {
+                "Yeniden başlatırsan oyun baştan başlar."
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+
         OverlayButton(
             text = "Devam Et",
             primary = true,
@@ -560,7 +652,11 @@ private fun PauseOverlay(
         )
 
         OverlayButton(
-            text = "Yeniden Başlat",
+            text = if (hasCheckpoint) {
+                "Checkpoint'ten Yeniden Başlat"
+            } else {
+                "Baştan Başlat"
+            },
             primary = false,
             onClick = onRestartClick
         )
@@ -576,85 +672,50 @@ private fun PauseOverlay(
 @Composable
 private fun GameOverOverlay(
     uiState: GameUiState,
+    checkpointStartLevel: Int,
     onRestartClick: () -> Unit,
     onExitToMenuClick: () -> Unit
 ) {
-    val tone = buildGameOverTone(uiState)
-    val performanceLabel = buildPerformanceLabel(uiState)
+    val reachedLevel = uiState.sessionSummary.reachedLevel
 
     CenterOverlayCard(
-        title = tone.title,
-        subtitle = tone.subtitle
+        title = "Run Bitti",
+        isGameOver = true,
+        subtitle = "Level $reachedLevel noktasına kadar geldin."
     ) {
         SummaryCard(
-            title = "Performans",
-            value = performanceLabel,
+            title = "Ulaşılan Level",
+            value = reachedLevel.toString(),
             modifier = Modifier.fillMaxWidth()
         )
 
-        Row(
+        SummaryCard(
+            title = "Checkpoint",
+            value = if (checkpointStartLevel > 1) {
+                "Level $checkpointStartLevel"
+            } else {
+                "Henüz açılmadı"
+            },
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(BallropDimens.Space12)
-        ) {
-            SummaryCard(
-                title = "Skor",
-                value = uiState.sessionSummary.score.toString(),
-                modifier = Modifier.weight(1f)
-            )
-
-            SummaryCard(
-                title = "Level",
-                value = uiState.sessionSummary.reachedLevel.toString(),
-                modifier = Modifier.weight(1f)
-            )
-
-            SummaryCard(
-                title = "İsabet",
-                value = "%${uiState.sessionSummary.accuracyPercent}",
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(BallropDimens.Space12)
-        ) {
-            SummaryCard(
-                title = "Doğru",
-                value = uiState.sessionSummary.totalCorrect.toString(),
-                modifier = Modifier.weight(1f)
-            )
-
-            SummaryCard(
-                title = "Hata",
-                value = uiState.sessionSummary.totalMistakes.toString(),
-                modifier = Modifier.weight(1f)
-            )
-
-            SummaryCard(
-                title = "En İyi Seri",
-                value = "x${uiState.sessionSummary.bestCombo}",
-                modifier = Modifier.weight(1f)
-            )
-        }
+            highlighted = checkpointStartLevel > 1
+        )
 
         SummaryCard(
-            title = "Not",
-            value = when {
-                uiState.sessionSummary.accuracyPercent < 60 ->
-                    "Önce temiz oyna, sonra hızlan. Checkpoint almadan risk büyür."
-
-                uiState.sessionSummary.bestCombo < 3 ->
-                    "Seri kurmaya odaklan. Asıl puan orada."
-
-                else ->
-                    "Ritmin fena değil. Checkpoint'e ulaşmak için 3 level bloklarını temiz geç."
+            title = "Devam",
+            value = if (checkpointStartLevel > 1) {
+                "Tekrar oynarsan Level $checkpointStartLevel noktasından başlarsın."
+            } else {
+                "Yeni oyun Level 1'den başlayacak."
             },
             modifier = Modifier.fillMaxWidth()
         )
 
         OverlayButton(
-            text = "Tekrar Oyna",
+            text = if (checkpointStartLevel > 1) {
+                "Checkpoint'ten Devam Et"
+            } else {
+                "Tekrar Oyna"
+            },
             primary = true,
             onClick = onRestartClick
         )
@@ -671,45 +732,185 @@ private fun GameOverOverlay(
 private fun CenterOverlayCard(
     title: String,
     subtitle: String,
+    isCelebration: Boolean = false,
+    isGameOver: Boolean = false,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    var entered by remember { mutableStateOf(false) }
+    var celebrationPulseUp by remember { mutableStateOf(false) }
+    var celebrationPulseDown by remember { mutableStateOf(false) }
+    var shakePhase by remember { mutableStateOf(0f) }
+    var effectFinished by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        delay(40)
+        entered = true
+
+        if (isCelebration) {
+            celebrationPulseUp = true
+            delay(140)
+            celebrationPulseDown = true
+            delay(220)
+            effectFinished = true
+        } else if (isGameOver) {
+            val shakePattern = listOf(
+                14f, -14f, 12f, -12f, 10f, -10f, 8f, -8f,
+                6f, -6f, 4f, -4f, 2f, -2f, 0f
+            )
+
+            shakePattern.forEach { value ->
+                shakePhase = value
+                delay(130)
+            }
+
+            effectFinished = true
+            shakePhase = 0f
+        } else {
+            effectFinished = true
+        }
+    }
+
+    val overlayAlpha by animateFloatAsState(
+        targetValue = if (entered) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = 260,
+            easing = FastOutSlowInEasing
+        ),
+        label = "overlayAlpha"
+    )
+
+    val cardBaseScale by animateFloatAsState(
+        targetValue = if (entered) 1f else 0.88f,
+        animationSpec = tween(
+            durationMillis = 280,
+            easing = FastOutSlowInEasing
+        ),
+        label = "cardBaseScale"
+    )
+
+    val cardAlpha by animateFloatAsState(
+        targetValue = if (entered) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = 220,
+            easing = FastOutSlowInEasing
+        ),
+        label = "cardAlpha"
+    )
+
+    val celebrationScale by animateFloatAsState(
+        targetValue = when {
+            !isCelebration -> 1f
+            effectFinished -> 1f
+            celebrationPulseDown -> 0.98f
+            celebrationPulseUp -> 1.08f
+            else -> 1f
+        },
+        animationSpec = tween(
+            durationMillis = 150,
+            easing = FastOutSlowInEasing
+        ),
+        label = "celebrationScale"
+    )
+
+    val gameOverShake by animateFloatAsState(
+        targetValue = if (isGameOver && !effectFinished) shakePhase else 0f,
+        animationSpec = tween(
+            durationMillis = 70,
+            easing = FastOutSlowInEasing
+        ),
+        label = "gameOverShake"
+    )
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(BallropColors.Black.copy(alpha = 0.42f)),
+            .background(BallropColors.Black.copy(alpha = 0.45f * overlayAlpha)),
         contentAlignment = Alignment.Center
     ) {
+        if (isCelebration && !effectFinished) {
+            CelebrationSparkles()
+        }
+
         Column(
             modifier = Modifier
-                .widthIn(max = 380.dp)
-                .background(
-                    color = BallropColors.Surface.copy(alpha = 0.98f),
+                .padding(horizontal = BallropDimens.Space20)
+                .graphicsLayer {
+                    alpha = cardAlpha
+                    scaleX = cardBaseScale * celebrationScale
+                    scaleY = cardBaseScale * celebrationScale
+                    translationX = gameOverShake
+                }
+                .clip(RoundedCornerShape(BallropDimens.Radius24))
+                .background(BallropColors.Surface.copy(alpha = 0.98f))
+                .border(
+                    width = 1.dp,
+                    color = BallropColors.White.copy(alpha = 0.06f),
                     shape = RoundedCornerShape(BallropDimens.Radius24)
                 )
-                .padding(
-                    horizontal = BallropDimens.Space24,
-                    vertical = BallropDimens.Space24
-                ),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(BallropDimens.Space12),
-            content = {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleLarge,
-                    color = BallropColors.TextPrimary,
-                    textAlign = TextAlign.Center
-                )
+                .padding(BallropDimens.Space20),
+            verticalArrangement = Arrangement.spacedBy(BallropDimens.Space14)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineSmall,
+                color = BallropColors.TextPrimary,
+                fontWeight = FontWeight.ExtraBold
+            )
 
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = BallropColors.TextSecondary,
-                    textAlign = TextAlign.Center
-                )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = BallropColors.TextSecondary
+            )
 
-                content()
-            }
-        )
+            content()
+        }
+    }
+}
+
+@Composable
+private fun CelebrationSparkles() {
+    val sparkleAlpha by animateFloatAsState(
+        targetValue = 1f,
+        animationSpec = tween(
+            durationMillis = 220,
+            easing = FastOutSlowInEasing
+        ),
+        label = "sparkleAlpha"
+    )
+
+    val sparkleDots = listOf(
+        Triple(0.18f, 0.22f, BallropColors.Warning),
+        Triple(0.30f, 0.14f, BallropColors.Success),
+        Triple(0.74f, 0.18f, BallropColors.Warning),
+        Triple(0.84f, 0.26f, BallropColors.Success),
+        Triple(0.20f, 0.78f, BallropColors.Warning),
+        Triple(0.82f, 0.74f, BallropColors.Success),
+        Triple(0.12f, 0.52f, BallropColors.White),
+        Triple(0.88f, 0.50f, BallropColors.White)
+    )
+
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxSize()
+    ) {
+        val widthPx = constraints.maxWidth.toFloat()
+        val heightPx = constraints.maxHeight.toFloat()
+
+        sparkleDots.forEachIndexed { index, dot ->
+            Box(
+                modifier = Modifier
+                    .graphicsLayer {
+                        translationX = dot.first * widthPx
+                        translationY = dot.second * heightPx
+                        alpha = sparkleAlpha
+                    }
+                    .size(if (index % 2 == 0) 10.dp else 7.dp)
+                    .background(
+                        color = dot.third.copy(alpha = 0.9f),
+                        shape = RoundedCornerShape(999.dp)
+                    )
+            )
+        }
     }
 }
 
@@ -719,25 +920,32 @@ private fun OverlayButton(
     primary: Boolean,
     onClick: () -> Unit
 ) {
+    val backgroundColor = if (primary) {
+        BallropColors.TextPrimary
+    } else {
+        BallropColors.SurfaceSoft
+    }
+
+    val contentColor = if (primary) {
+        BallropColors.BackgroundPrimary
+    } else {
+        BallropColors.TextPrimary
+    }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(
-                color = if (primary) {
-                    BallropColors.BasketBlue
-                } else {
-                    BallropColors.SurfaceSoft
-                },
-                shape = RoundedCornerShape(BallropDimens.Radius16)
-            )
+            .clip(RoundedCornerShape(BallropDimens.Radius16))
+            .background(backgroundColor)
             .clickable(onClick = onClick)
-            .padding(vertical = BallropDimens.Space16),
+            .padding(vertical = BallropDimens.Space14),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = text,
             style = MaterialTheme.typography.titleMedium,
-            color = BallropColors.TextPrimary
+            color = contentColor,
+            fontWeight = FontWeight.Bold
         )
     }
 }
@@ -746,12 +954,19 @@ private fun OverlayButton(
 private fun SummaryCard(
     title: String,
     value: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    highlighted: Boolean = false
 ) {
+    val backgroundColor = if (highlighted) {
+        BallropColors.Success.copy(alpha = 0.18f)
+    } else {
+        BallropColors.SurfaceSoft
+    }
+
     Column(
         modifier = modifier
             .background(
-                color = BallropColors.SurfaceSoft,
+                color = backgroundColor,
                 shape = RoundedCornerShape(BallropDimens.Radius16)
             )
             .padding(
@@ -856,4 +1071,75 @@ private fun buildPerformanceLabel(uiState: GameUiState): String {
         accuracy >= 50 -> "Dalgalı oyun"
         else -> "Ham başlangıç"
     }
+}
+
+private data class CheckpointInfo(
+    val unlockedNow: Boolean,
+    val resumeLevel: Int,
+    val levelsUntilNextCheckpoint: Int,
+    val nextCheckpointUnlockLevel: Int
+)
+private data class GameOverCheckpointInfo(
+    val hasCheckpoint: Boolean,
+    val resumeLevel: Int,
+    val savedAfterLevel: Int,
+    val levelsCoveredSinceCheckpoint: Int
+)
+
+private fun buildGameOverCheckpointInfo(
+    reachedLevel: Int,
+    checkpointStartLevel: Int
+): GameOverCheckpointInfo {
+    val safeCheckpointStartLevel = checkpointStartLevel.coerceAtLeast(1)
+    val hasCheckpoint = safeCheckpointStartLevel > 1
+    val savedAfterLevel = (safeCheckpointStartLevel - 1).coerceAtLeast(0)
+
+    val levelsCoveredSinceCheckpoint = if (hasCheckpoint) {
+        (reachedLevel - savedAfterLevel).coerceAtLeast(0)
+    } else {
+        reachedLevel.coerceAtLeast(1)
+    }
+
+    return GameOverCheckpointInfo(
+        hasCheckpoint = hasCheckpoint,
+        resumeLevel = safeCheckpointStartLevel,
+        savedAfterLevel = savedAfterLevel,
+        levelsCoveredSinceCheckpoint = levelsCoveredSinceCheckpoint
+    )
+}
+private fun buildCheckpointInfo(
+    completedLevel: Int,
+    savedCheckpointStartLevel: Int
+): CheckpointInfo {
+    val unlockedNow = completedLevel % 3 == 0
+
+    val nextCheckpointUnlockLevel = if (unlockedNow) {
+        completedLevel + 3
+    } else {
+        completedLevel + (3 - (completedLevel % 3))
+    }
+
+    val levelsUntilNextCheckpoint = (nextCheckpointUnlockLevel - completedLevel)
+        .coerceAtLeast(0)
+
+    val resumeLevel = if (unlockedNow) {
+        completedLevel + 1
+    } else {
+        savedCheckpointStartLevel.coerceAtLeast(1)
+    }
+
+    return CheckpointInfo(
+        unlockedNow = unlockedNow,
+        resumeLevel = resumeLevel,
+        levelsUntilNextCheckpoint = levelsUntilNextCheckpoint,
+        nextCheckpointUnlockLevel = nextCheckpointUnlockLevel
+    )
+}
+private fun calculateCheckpointStartLevelForLevel(level: Int): Int {
+    val safeLevel = level.coerceAtLeast(1)
+
+    if (safeLevel <= 3) return 1
+
+    val checkpointBlockStart = ((safeLevel - 1) / 3) * 3 + 1
+    return checkpointBlockStart
 }

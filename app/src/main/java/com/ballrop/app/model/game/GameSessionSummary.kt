@@ -5,6 +5,8 @@ data class GameSessionSummary(
     val reachedLevel: Int = 1,
     val totalCorrect: Int = 0,
     val totalMistakes: Int = 0,
+    val wrongBasketCount: Int = 0,
+    val missedBallCount: Int = 0,
     val bestCombo: Int = 0,
     val accuracyPercent: Int = 0,
     val durationSeconds: Int = 0

@@ -14,6 +14,10 @@ import kotlin.math.hypot
 import kotlin.random.Random
 import com.ballrop.app.model.game.BallKind
 
+import com.ballrop.app.engine.spawn.DifficultyResolver
+import com.ballrop.app.model.game.BallMovementType
+import kotlin.math.sin
+import com.ballrop.app.model.game.SpawnPatternType
 
 class GameController {
 
@@ -147,6 +151,7 @@ class GameController {
             GameAction.Tick -> {
                 updateFeedbackPopups()
                 updateBasketGlow()
+                updateImpactOverlay()
 
                 if (uiState.status != GameStatus.PLAYING) return
                 if (uiState.canvasWidth <= 0f || uiState.canvasHeight <= 0f) return
@@ -159,6 +164,13 @@ class GameController {
             }
             is GameAction.StartFromLevel -> {
                 resetSessionForLevel(level = action.level)
+            }
+
+            //debug
+            GameAction.DebugAddLives -> {
+                uiState = uiState.copy(
+                    maxMistakesAllowed = uiState.maxMistakesAllowed + 10
+                )
             }
 
         }
@@ -288,39 +300,62 @@ class GameController {
 
         if (maxX <= minX) return
 
-        val randomX = Random.nextFloat() * (maxX - minX) + minX
-        val color = if (Random.nextBoolean()) BallColor.BLUE else BallColor.RED
-        val kind = chooseBallKind()
-
-
-        val drift = (
-                (Random.nextFloat() * 2f - 1f) *
-                        uiState.levelConfig.horizontalDriftMultiplier *
-                        currentDriftMultiplier()
-                )
-
-        val rotationSpeed = Random.nextFloat() * 7f + 2f
-        val signedRotationSpeed = if (Random.nextBoolean()) rotationSpeed else -rotationSpeed
-
-        val newBall = BallItem(
-            id = nextBallId++,
-            color = color,
-            kind = kind,
-            x = randomX,
-            y = radius + 8f,
+        val patternType = chooseSpawnPatternType()
+        val spawnPositions = buildSpawnPositions(
+            patternType = patternType,
             radius = radius,
-            speed = uiState.levelConfig.baseFallSpeed / 60f,
-            driftX = drift,
-            velocityX = 0f,
-            velocityY = 0f,
-            rotationDeg = Random.nextFloat() * 360f,
-            rotationSpeedDeg = signedRotationSpeed,
-            scale = 1f
+            minX = minX,
+            maxX = maxX
         )
 
+        if (spawnPositions.isEmpty()) return
+
+        val isPatternWave = patternType != SpawnPatternType.SINGLE
+
+        val newBalls = spawnPositions.map { position ->
+            val movementType = if (isPatternWave) {
+                BallMovementType.STRAIGHT
+            } else {
+                chooseMovementType()
+            }
+
+            val kind = chooseBallKind()
+
+            val baseDrift = when (movementType) {
+                BallMovementType.STRAIGHT -> 0f
+                BallMovementType.DRIFT_LEFT -> -(0.8f + Random.nextFloat() * 0.6f)
+                BallMovementType.DRIFT_RIGHT -> 0.8f + Random.nextFloat() * 0.6f
+                BallMovementType.ZIGZAG_SOFT -> 0f
+                BallMovementType.ZIGZAG_HARD -> 0f
+                BallMovementType.DIAGONAL_LEFT -> -uiState.levelConfig.diagonalDriftStrength
+                BallMovementType.DIAGONAL_RIGHT -> uiState.levelConfig.diagonalDriftStrength
+            }
+
+            val rotationSpeed = Random.nextFloat() * 7f + 2f
+            val signedRotationSpeed = if (Random.nextBoolean()) rotationSpeed else -rotationSpeed
+
+            BallItem(
+                id = nextBallId++,
+                color = randomBallColor(),
+                kind = kind,
+                x = position.x,
+                y = position.y,
+                radius = radius,
+                speed = uiState.levelConfig.baseFallSpeed / 60f,
+                driftX = baseDrift,
+                velocityX = 0f,
+                velocityY = 0f,
+                rotationDeg = Random.nextFloat() * 360f,
+                rotationSpeedDeg = signedRotationSpeed,
+                scale = 1f,
+                movementType = movementType,
+                movementPhase = Random.nextFloat() * 6.2831855f,
+                lockedToPattern = isPatternWave
+            )
+        }
 
         uiState = uiState.copy(
-            balls = uiState.balls + newBall
+            balls = uiState.balls + newBalls
         )
 
         lastSpawnTimeMillis = now
@@ -329,6 +364,7 @@ class GameController {
 
     private fun updateFallingBalls() {
         val tempoFallMultiplier = currentFallMultiplier()
+        val config = uiState.levelConfig
 
         uiState = uiState.copy(
             balls = uiState.balls.map { ball ->
@@ -338,9 +374,37 @@ class GameController {
                     val nextVelocityX = ball.velocityX * 0.90f
                     val nextVelocityY = ball.velocityY * 0.90f
 
+                    val movementOffsetX = if (ball.lockedToPattern) {
+                        0f
+                    } else {
+                        when (ball.movementType) {
+                            BallMovementType.STRAIGHT -> 0f
+
+                            BallMovementType.DRIFT_LEFT,
+                            BallMovementType.DRIFT_RIGHT -> {
+                                ball.driftX * currentDriftMultiplier()
+                            }
+
+                            BallMovementType.DIAGONAL_LEFT,
+                            BallMovementType.DIAGONAL_RIGHT -> {
+                                ball.driftX * currentDriftMultiplier()
+                            }
+
+                            BallMovementType.ZIGZAG_SOFT -> {
+                                sin(ball.y * config.zigzagFrequency + ball.movementPhase) *
+                                        config.zigzagAmplitude * 0.35f
+                            }
+
+                            BallMovementType.ZIGZAG_HARD -> {
+                                sin(ball.y * (config.zigzagFrequency * 1.2f) + ball.movementPhase) *
+                                        config.zigzagAmplitude * 0.55f
+                            }
+                        }
+                    }
+
                     val nextX = (
                             ball.x +
-                                    (ball.driftX * tempoFallMultiplier) +
+                                    movementOffsetX +
                                     nextVelocityX
                             ).coerceIn(ball.radius, uiState.canvasWidth - ball.radius)
 
@@ -465,6 +529,7 @@ class GameController {
                         }
 
                         newFeedbackEvents += createFeedbackEvent(GameFeedbackType.CORRECT)
+                        triggerImpactOverlay(GameFeedbackType.CORRECT)
                     } else {
                         scoreDelta -= uiState.levelConfig.wrongPenalty
                         wrongDelta += 1
@@ -480,6 +545,7 @@ class GameController {
                         )
 
                         newFeedbackEvents += createFeedbackEvent(GameFeedbackType.WRONG)
+                        triggerImpactOverlay(GameFeedbackType.WRONG)
                     }
                 }
             }
@@ -515,6 +581,9 @@ class GameController {
             },
             status = if (levelCompleted) GameStatus.LEVEL_COMPLETED else uiState.status
         )
+        if (levelCompleted) {
+            triggerImpactOverlay(GameFeedbackType.LEVEL_COMPLETE)
+        }
     }
 
 
@@ -591,6 +660,9 @@ class GameController {
                         else -> emptyList()
                     }
         )
+        if (normalMissCount > 0) {
+            triggerImpactOverlay(GameFeedbackType.MISS)
+        }
     }
 
 
@@ -630,6 +702,45 @@ class GameController {
         )
     }
 
+    private fun triggerImpactOverlay(
+        type: GameFeedbackType
+    ) {
+        val startAlpha = when (type) {
+            GameFeedbackType.CORRECT -> 0.16f
+            GameFeedbackType.WRONG -> 0.22f
+            GameFeedbackType.MISS -> 0.18f
+            GameFeedbackType.LEVEL_COMPLETE -> 0.24f
+            GameFeedbackType.GAME_OVER -> 0.30f
+        }
+
+        uiState = uiState.copy(
+            impactOverlay = GameImpactOverlay(
+                type = type,
+                alpha = startAlpha
+            )
+        )
+    }
+
+    private fun updateImpactOverlay() {
+        val overlay = uiState.impactOverlay ?: return
+
+        val nextAlpha = when (overlay.type) {
+            GameFeedbackType.CORRECT -> overlay.alpha - 0.018f
+            GameFeedbackType.WRONG -> overlay.alpha - 0.024f
+            GameFeedbackType.MISS -> overlay.alpha - 0.022f
+            GameFeedbackType.LEVEL_COMPLETE -> overlay.alpha - 0.016f
+            GameFeedbackType.GAME_OVER -> overlay.alpha - 0.014f
+        }
+
+        uiState = uiState.copy(
+            impactOverlay = if (nextAlpha <= 0.01f) {
+                null
+            } else {
+                overlay.copy(alpha = nextAlpha)
+            }
+        )
+    }
+
     private fun checkGameOver() {
         if (uiState.status == GameStatus.LEVEL_COMPLETED) return
         if (uiState.status == GameStatus.GAME_OVER) return
@@ -655,12 +766,15 @@ class GameController {
                     reachedLevel = uiState.currentLevel,
                     totalCorrect = uiState.totalCorrectCount,
                     totalMistakes = uiState.totalMistakes,
+                    wrongBasketCount = uiState.wrongCount,
+                    missedBallCount = uiState.missedCount,
                     bestCombo = uiState.bestCombo,
                     accuracyPercent = uiState.accuracyPercent,
                     durationSeconds = durationSeconds
                 ),
                 feedbackEvents = uiState.feedbackEvents + createFeedbackEvent(GameFeedbackType.GAME_OVER)
             )
+            triggerImpactOverlay(GameFeedbackType.GAME_OVER)
         }
     }
 
@@ -772,6 +886,128 @@ class GameController {
             else -> config.rushDriftMultiplier
         }
     }
+
+    private fun chooseMovementType(): BallMovementType {
+        val types = uiState.levelConfig.allowedMovementTypes
+        if (types.isEmpty()) return BallMovementType.STRAIGHT
+        return types.random()
+    }
+
+    private fun chooseSpawnPatternType(): SpawnPatternType {
+        val config = uiState.levelConfig
+        val patterns = config.allowedPatternTypes
+
+        if (patterns.isEmpty()) return SpawnPatternType.SINGLE
+
+        val featuredPattern = config.featuredPatternType
+        val featuredChance = config.featuredPatternChance
+
+        if (
+            featuredPattern != null &&
+            featuredPattern in patterns &&
+            Random.nextFloat() < featuredChance
+        ) {
+            return featuredPattern
+        }
+
+        val shouldUseMultiBallWave =
+            patterns.any { it != SpawnPatternType.SINGLE } &&
+                    Random.nextFloat() < config.multiBallWaveChance
+
+        if (!shouldUseMultiBallWave) {
+            return SpawnPatternType.SINGLE
+        }
+
+        val multiPatterns = patterns.filter { it != SpawnPatternType.SINGLE }
+        if (multiPatterns.isEmpty()) return SpawnPatternType.SINGLE
+
+        return multiPatterns.random()
+    }
+
+    private fun buildSpawnPositions(
+        patternType: SpawnPatternType,
+        radius: Float,
+        minX: Float,
+        maxX: Float
+    ): List<SpawnPoint> {
+        val safeWidth = maxX - minX
+        if (safeWidth <= 0f) return emptyList()
+
+        val horizontalGap = radius * 2.6f
+        val verticalGap = radius * 2.4f
+
+        return when (patternType) {
+            SpawnPatternType.SINGLE -> {
+                val centerX = Random.nextFloat() * safeWidth + minX
+                listOf(
+                    SpawnPoint(
+                        x = centerX,
+                        y = radius + 8f
+                    )
+                )
+            }
+
+            SpawnPatternType.COLUMN -> {
+                val centerX = Random.nextFloat() * safeWidth + minX
+
+                listOf(
+                    SpawnPoint(centerX, radius + 8f),
+                    SpawnPoint(centerX, radius + 8f + verticalGap),
+                    SpawnPoint(centerX, radius + 8f + verticalGap * 2f)
+                )
+            }
+
+            SpawnPatternType.V_SHAPE -> {
+                val centerX = (Random.nextFloat() * (safeWidth - horizontalGap * 2f) + minX + horizontalGap)
+                    .coerceIn(minX + horizontalGap, maxX - horizontalGap)
+
+                listOf(
+                    SpawnPoint(centerX, radius + 8f),
+                    SpawnPoint(centerX - horizontalGap, radius + 8f + verticalGap),
+                    SpawnPoint(centerX + horizontalGap, radius + 8f + verticalGap),
+                    SpawnPoint(centerX - horizontalGap * 2f, radius + 8f + verticalGap * 2f),
+                    SpawnPoint(centerX + horizontalGap * 2f, radius + 8f + verticalGap * 2f)
+                ).filter { it.x in minX..maxX }
+            }
+
+            SpawnPatternType.SQUARE -> {
+                val leftX = (Random.nextFloat() * (safeWidth - horizontalGap) + minX)
+                    .coerceIn(minX, maxX - horizontalGap)
+
+                val rightX = (leftX + horizontalGap).coerceAtMost(maxX)
+
+                listOf(
+                    SpawnPoint(leftX, radius + 8f),
+                    SpawnPoint(rightX, radius + 8f),
+                    SpawnPoint(leftX, radius + 8f + verticalGap),
+                    SpawnPoint(rightX, radius + 8f + verticalGap)
+                )
+            }
+
+            SpawnPatternType.ARC -> {
+                val centerX = (Random.nextFloat() * (safeWidth - horizontalGap * 4f) + minX + horizontalGap * 2f)
+                    .coerceIn(minX + horizontalGap * 2f, maxX - horizontalGap * 2f)
+
+                listOf(
+                    SpawnPoint(centerX - horizontalGap * 2f, radius + 8f + verticalGap * 2f),
+                    SpawnPoint(centerX - horizontalGap, radius + 8f + verticalGap),
+                    SpawnPoint(centerX, radius + 8f),
+                    SpawnPoint(centerX + horizontalGap, radius + 8f + verticalGap),
+                    SpawnPoint(centerX + horizontalGap * 2f, radius + 8f + verticalGap * 2f)
+                ).filter { it.x in minX..maxX }
+            }
+        }
+    }
+
+    private fun randomBallColor(): BallColor {
+        return if (Random.nextBoolean()) BallColor.BLUE else BallColor.RED
+    }
+
+    private data class SpawnPoint(
+        val x: Float,
+        val y: Float
+    )
+
     private fun chooseBallKind(): BallKind {
         val roll = Random.nextFloat()
         val config = uiState.levelConfig
@@ -786,56 +1022,7 @@ class GameController {
 
 
     private fun currentLevelConfig(level: Int): LevelConfig {
-        val safeLevel = level.coerceAtLeast(1)
-
-        val targetCorrectCount = (20 + ((safeLevel - 1) * 2)).coerceAtMost(42)
-        val spawnIntervalMillis = (1150L - ((safeLevel - 1) * 90L)).coerceAtLeast(520L)
-        val baseFallSpeed = 240f + ((safeLevel - 1) * 35f)
-        val comboResetWindowMillis = (1800L - ((safeLevel - 1) * 120L)).coerceAtLeast(900L)
-        val maxComboBonusSteps = (2 + ((safeLevel - 1) / 2)).coerceAtMost(5)
-        val horizontalDriftMultiplier = 1f + ((safeLevel - 1) * 0.10f)
-
-        val bonusBallChance = when {
-            safeLevel <= 1 -> 0f
-            safeLevel <= 3 -> 0.08f
-            safeLevel <= 6 -> 0.12f
-            else -> 0.16f
-        }
-
-        val dangerBallChance = when {
-            safeLevel <= 3 -> 0f
-            safeLevel <= 6 -> 0.06f
-            safeLevel <= 10 -> 0.10f
-            else -> 0.14f
-        }
-
-        return LevelConfig(
-            targetCorrectCount = targetCorrectCount,
-            spawnIntervalMillis = spawnIntervalMillis,
-            baseFallSpeed = baseFallSpeed,
-            comboResetWindowMillis = comboResetWindowMillis,
-            maxComboBonusSteps = maxComboBonusSteps,
-            horizontalDriftMultiplier = horizontalDriftMultiplier,
-            correctBaseScore = 10,
-            wrongPenalty = 5,
-            missPenalty = 5,
-
-            introProgressThreshold = 0.30f,
-            rushProgressThreshold = 0.75f,
-
-            introSpawnMultiplier = 1.18f,
-            introFallMultiplier = 0.88f,
-
-            rushSpawnMultiplier = 0.78f,
-            rushFallMultiplier = 1.22f,
-            rushDriftMultiplier = 1.18f,
-
-            bonusBallChance = bonusBallChance,
-            dangerBallChance = dangerBallChance,
-            bonusExtraScore = 15,
-            dangerPenalty = 12,
-            dangerEscapeScore = 8
-        )
+        return DifficultyResolver.resolve(level)
     }
 
     private fun resetSessionForLevel(level: Int) {

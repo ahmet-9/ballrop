@@ -15,5 +15,8 @@ data class BallItem(
     val rotationSpeedDeg: Float = 0f,
     val scale: Float = 1f,
     val isDragging: Boolean = false,
-    val justCaptured: Boolean = false
+    val justCaptured: Boolean = false,
+    val movementType: BallMovementType = BallMovementType.STRAIGHT,
+    val movementPhase: Float = 0f,
+    val lockedToPattern: Boolean = false
 )

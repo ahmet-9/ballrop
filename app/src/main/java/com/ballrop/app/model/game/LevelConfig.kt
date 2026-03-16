@@ -25,5 +25,15 @@ data class LevelConfig(
     val dangerBallChance: Float = 0f,
     val bonusExtraScore: Int = 15,
     val dangerPenalty: Int = 12,
-    val dangerEscapeScore: Int = 8
+    val dangerEscapeScore: Int = 8,
+
+    val allowedMovementTypes: List<BallMovementType> = listOf(BallMovementType.STRAIGHT),
+    val zigzagAmplitude: Float = 14f,
+    val zigzagFrequency: Float = 0.05f,
+    val diagonalDriftStrength: Float = 1.2f,
+
+    val allowedPatternTypes: List<SpawnPatternType> = listOf(SpawnPatternType.SINGLE),
+    val multiBallWaveChance: Float = 0f,
+    val featuredPatternType: SpawnPatternType? = null,
+    val featuredPatternChance: Float = 0f
 )

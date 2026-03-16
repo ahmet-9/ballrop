@@ -38,24 +38,92 @@ import com.ballrop.app.core.design.BallropColors
 import com.ballrop.app.core.design.BallropDimens
 import com.ballrop.app.core.storage.GameProgressStorage
 
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+
 @Composable
 fun HomeScreen(
     onStartClick: () -> Unit,
     onContinueClick: (Int) -> Unit
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val progressStorage = remember { GameProgressStorage(context) }
 
     var bestScore by remember { mutableIntStateOf(0) }
     var bestLevel by remember { mutableIntStateOf(1) }
     var checkpointStartLevel by remember { mutableIntStateOf(1) }
     var canContinue by remember { mutableStateOf(false) }
+    var showNewGameConfirmDialog by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
+    fun refreshProgressState() {
         bestScore = progressStorage.getBestScore()
         bestLevel = progressStorage.getBestLevel()
-        checkpointStartLevel = progressStorage.getCheckpointStartLevel()
-        canContinue = progressStorage.canContinue()
+
+        val storedCheckpoint = progressStorage.getCheckpointStartLevel()
+        val storedCanContinue = progressStorage.canContinue()
+
+        checkpointStartLevel = storedCheckpoint
+        canContinue = storedCanContinue && storedCheckpoint > 1
+    }
+
+    LaunchedEffect(Unit) {
+        refreshProgressState()
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                refreshProgressState()
+            }
+        }
+
+        lifecycleOwner.lifecycle.addObserver(observer)
+
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    if (showNewGameConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showNewGameConfirmDialog = false
+            },
+            title = {
+                Text(text = "Yeni Oyun Başlat")
+            },
+            text = {
+                Text(
+                    text = "Mevcut devam hakkın silinecek. Yeni oyun Level 1'den başlayacak."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        progressStorage.clearContinueProgress()
+                        refreshProgressState()
+                        showNewGameConfirmDialog = false
+                        onStartClick()
+                    }
+                ) {
+                    Text(text = "Başlat")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showNewGameConfirmDialog = false
+                    }
+                ) {
+                    Text(text = "Vazgeç")
+                }
+            }
+        )
     }
 
     BoxWithConstraints(
@@ -92,7 +160,7 @@ fun HomeScreen(
                 )
 
                 Text(
-                    text = "Renkli topları doğru sepetlere sürükle, ritmi yakala ve en yüksek skoru yap.",
+                    text = "Renkli topları doğru sepetlere sürükle. İlerleme checkpoint ile korunur.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = BallropColors.TextSecondary,
                     textAlign = TextAlign.Center
@@ -126,8 +194,13 @@ fun HomeScreen(
                 StartGameButton(
                     text = if (canContinue) "Yeni Oyun" else "Oyuna Başla",
                     onClick = {
-                        progressStorage.clearContinueProgress()
-                        onStartClick()
+                        if (canContinue) {
+                            showNewGameConfirmDialog = true
+                        } else {
+                            progressStorage.clearContinueProgress()
+                            refreshProgressState()
+                            onStartClick()
+                        }
                     }
                 )
 
@@ -388,8 +461,9 @@ private fun QuickInfoCard(
             .padding(BallropDimens.Space16),
         verticalArrangement = Arrangement.spacedBy(BallropDimens.Space8)
     ) {
+
         Text(
-            text = if (canContinue) "Checkpoint Sistemi" else "Nasıl Oynanır?",
+            text = if (canContinue) "Devam Bilgisi" else "Oyun Mantığı",
             style = MaterialTheme.typography.titleMedium,
             color = BallropColors.TextPrimary,
             fontWeight = FontWeight.Bold
@@ -397,9 +471,9 @@ private fun QuickInfoCard(
 
         Text(
             text = if (canContinue) {
-                "Her 3 levelde bir checkpoint açılır. Şu an devam edersen Level $checkpointStartLevel noktasından başlarsın."
+                "Devam edersen Level $checkpointStartLevel noktasından başlarsın. Yeni oyun başlatırsan mevcut devam hakkın sıfırlanır."
             } else {
-                "• Düşen topları parmağınla sürükle\n• Mavi topu mavi sepete, kırmızı topu kırmızı sepete bırak\n• Yanlış yerleştirme ve kaçırma puan düşürür\n• Her 3 levelde bir checkpoint açılır"
+                "Amaç doğru topu doğru sepete yönlendirmek. Asıl ilerleme level ve checkpoint üzerinden ilerler."
             },
             style = MaterialTheme.typography.bodyMedium,
             color = BallropColors.TextSecondary

@@ -15,34 +15,34 @@ class AndroidGameFeedbackManager(
     private val appContext = context.applicationContext
 
     private val toneGenerator by lazy {
-        ToneGenerator(AudioManager.STREAM_MUSIC, 80)
+        ToneGenerator(AudioManager.STREAM_MUSIC, 78)
     }
 
     override fun play(type: GameFeedbackType) {
         when (type) {
             GameFeedbackType.CORRECT -> {
-                toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP, 70)
-                vibrate(18)
+                toneGenerator.startTone(ToneGenerator.TONE_PROP_ACK, 55)
+                vibrate(14)
             }
 
             GameFeedbackType.WRONG -> {
-                toneGenerator.startTone(ToneGenerator.TONE_PROP_NACK, 120)
-                vibrate(45)
+                toneGenerator.startTone(ToneGenerator.TONE_PROP_NACK, 95)
+                vibrate(34)
             }
 
             GameFeedbackType.MISS -> {
-                toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP2, 90)
-                vibrate(30)
+                toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP2, 75)
+                vibrate(24)
             }
 
             GameFeedbackType.LEVEL_COMPLETE -> {
-                toneGenerator.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 180)
-                vibratePattern(longArrayOf(0, 35, 35, 55))
+                toneGenerator.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 170)
+                vibratePattern(longArrayOf(0, 26, 30, 42))
             }
 
             GameFeedbackType.GAME_OVER -> {
-                toneGenerator.startTone(ToneGenerator.TONE_SUP_ERROR, 220)
-                vibratePattern(longArrayOf(0, 60, 50, 80))
+                toneGenerator.startTone(ToneGenerator.TONE_SUP_ERROR, 210)
+                vibratePattern(longArrayOf(0, 42, 36, 62))
             }
         }
     }

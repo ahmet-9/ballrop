@@ -26,12 +26,16 @@ fun BallropNavHost(
                 onStartClick = {
                     navController.navigate(
                         BallropRoute.Game.createRoute(startLevel = 1)
-                    )
+                    ) {
+                        launchSingleTop = true
+                    }
                 },
                 onContinueClick = { level ->
                     navController.navigate(
                         BallropRoute.Game.createRoute(startLevel = level)
-                    )
+                    ) {
+                        launchSingleTop = true
+                    }
                 }
             )
         }
@@ -50,7 +54,10 @@ fun BallropNavHost(
             GameScreen(
                 startLevel = startLevel,
                 onExitToMenu = {
-                    navController.popBackStack()
+                    navController.popBackStack(
+                        route = BallropRoute.Home.route,
+                        inclusive = false
+                    )
                 }
             )
         }
