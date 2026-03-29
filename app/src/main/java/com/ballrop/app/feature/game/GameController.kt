@@ -18,6 +18,8 @@ import com.ballrop.app.engine.spawn.DifficultyResolver
 import com.ballrop.app.model.game.BallMovementType
 import kotlin.math.sin
 import com.ballrop.app.model.game.SpawnPatternType
+import kotlin.math.abs
+
 
 class GameController {
 
@@ -294,7 +296,7 @@ class GameController {
 
         if (now - lastSpawnTimeMillis < interval) return
 
-        val radius = (uiState.canvasWidth * 0.045f).coerceIn(18f, 32f)
+        val radius = (uiState.canvasWidth * 0.052f).coerceIn(22f, 38f)
         val minX = radius
         val maxX = uiState.canvasWidth - radius
 
@@ -371,10 +373,19 @@ class GameController {
                 if (ball.isDragging) {
                     ball
                 } else {
-                    val nextVelocityX = ball.velocityX * 0.90f
-                    val nextVelocityY = ball.velocityY * 0.90f
+                    val nextVelocityX = if (ball.rimRejected) {
+                        ball.velocityX * 0.985f
+                    } else {
+                        ball.velocityX * 0.90f
+                    }
 
-                    val movementOffsetX = if (ball.lockedToPattern) {
+                    val nextVelocityY = if (ball.rimRejected) {
+                        ball.velocityY * 0.96f
+                    } else {
+                        ball.velocityY * 0.90f
+                    }
+
+                    val movementOffsetX = if (ball.lockedToPattern || ball.rimRejected) {
                         0f
                     } else {
                         when (ball.movementType) {
@@ -402,13 +413,18 @@ class GameController {
                         }
                     }
 
+                    val rejectedExtraDrop = if (ball.rimRejected) 1f else 0f
+
                     val nextX = (
                             ball.x +
                                     movementOffsetX +
                                     nextVelocityX
                             ).coerceIn(ball.radius, uiState.canvasWidth - ball.radius)
 
-                    val nextY = ball.y + (ball.speed * tempoFallMultiplier) + nextVelocityY
+                    val nextY = ball.y +
+                            (ball.speed * tempoFallMultiplier) +
+                            nextVelocityY +
+                            rejectedExtraDrop
 
                     val nextScale = when {
                         ball.justCaptured -> (ball.scale - 0.08f).coerceAtLeast(0.76f)
@@ -417,15 +433,22 @@ class GameController {
                         else -> 1f
                     }
 
-                    ball.copy(
+                    val movedBall = ball.copy(
                         x = nextX,
                         y = nextY,
                         velocityX = nextVelocityX,
                         velocityY = nextVelocityY,
                         rotationDeg = ball.rotationDeg + ball.rotationSpeedDeg,
                         scale = nextScale,
-                        justCaptured = false
+                        justCaptured = false,
+                        rimBounceCooldownFrames = (ball.rimBounceCooldownFrames - 1).coerceAtLeast(0)
                     )
+
+                    if (movedBall.rimRejected) {
+                        movedBall
+                    } else {
+                        applyBasketPointPhysics(movedBall)
+                    }
                 }
             }
         )
@@ -806,6 +829,326 @@ class GameController {
         )
     }
 
+    private fun applyBasketRimBounce(
+        ball: BallItem
+    ): BallItem {
+        if (uiState.baskets.isEmpty()) return ball
+
+        var result = ball
+
+        uiState.baskets.forEach { basket ->
+            val basketWidth = basket.right - basket.left
+            val basketHeight = basket.bottom - basket.top
+
+            val entryLeft = basket.left + (basketWidth * 0.24f)
+            val entryRight = basket.right - (basketWidth * 0.24f)
+
+            val rimTop = basket.top - (result.radius * 0.25f)
+            val rimBottom = basket.top + (basketHeight * 0.10f)
+
+            val ballBottom = result.y + result.radius
+            val touchesRimBand = ballBottom in rimTop..rimBottom
+
+            if (!touchesRimBand) return@forEach
+
+            val isDescending = result.speed + result.velocityY > 0f
+            if (!isDescending) return@forEach
+
+            val basketCenter = (basket.left + basket.right) / 2f
+
+            val leftRimZone = result.x >= basket.left && result.x < entryLeft
+            val rightRimZone = result.x <= basket.right && result.x > entryRight
+            val centerOpenZone = result.x in entryLeft..entryRight
+
+            val movingTowardCenterFromLeft = result.velocityX > 1.2f
+            val movingTowardCenterFromRight = result.velocityX < -1.2f
+
+            result = when {
+                leftRimZone -> {
+                    if (movingTowardCenterFromLeft) {
+                        result.copy(
+                            velocityX = abs(result.velocityX).coerceAtLeast(2.6f) * 0.75f,
+                            velocityY = abs(result.velocityY).coerceAtLeast(1.8f) * 1.55f,
+                            y = basket.top + (basketHeight * 0.06f)
+                        )
+                    } else {
+                        result.copy(
+                            velocityX = -abs(result.velocityX).coerceAtLeast(4.5f),
+                            velocityY = -abs(result.velocityY).coerceAtLeast(9f),
+                            y = basket.top - result.radius * 0.35f
+                        )
+                    }
+                }
+
+                rightRimZone -> {
+                    if (movingTowardCenterFromRight) {
+                        result.copy(
+                            velocityX = -abs(result.velocityX).coerceAtLeast(2.6f) * 0.75f,
+                            velocityY = abs(result.velocityY).coerceAtLeast(1.8f) * 0.35f,
+                            y = basket.top + (basketHeight * 0.06f)
+                        )
+                    } else {
+                        result.copy(
+                            velocityX = abs(result.velocityX).coerceAtLeast(4.5f),
+                            velocityY = -abs(result.velocityY).coerceAtLeast(3.8f),
+                            y = basket.top - result.radius * 0.35f
+                        )
+                    }
+                }
+
+                centerOpenZone -> {
+                    val almostVertical = abs(result.velocityX) < 1.15f
+
+                    if (almostVertical) {
+                        val outwardX = if (result.x < basketCenter) -4.8f else 4.8f
+                        result.copy(
+                            velocityX = outwardX,
+                            velocityY = -abs(result.velocityY).coerceAtLeast(3.6f),
+                            y = basket.top - result.radius * 0.30f
+                        )
+                    } else {
+                        result
+                    }
+                }
+
+                else -> result
+            }
+        }
+
+        return result
+    }
+
+    private fun applyBasketRimPhysics(
+        ball: BallItem
+    ): BallItem {
+        if (uiState.baskets.isEmpty()) return ball
+        if (ball.rimBounceCooldownFrames > 0) return ball
+        if (ball.rimRejected) return ball
+
+        var result = ball
+
+        uiState.baskets.forEach { basket ->
+            val basketWidth = basket.right - basket.left
+            val basketHeight = basket.bottom - basket.top
+
+            // Ağzın orta açıklığı - daha affedici
+            val openLeft = basket.left + (basketWidth * 0.18f)
+            val openRight = basket.right - (basketWidth * 0.18f)
+
+            // Top zaten açıklığın içindeyse rim çarpması verme
+            val alreadyInsideOpening =
+                result.x in openLeft..openRight &&
+                        result.y > basket.top + (basketHeight * 0.04f)
+
+            if (alreadyInsideOpening) return@forEach
+
+            // Sadece sağ/sol çerçeve bölgelerinde çarpma olsun
+            val leftRimCenterX = basket.left + (basketWidth * 0.11f)
+            val rightRimCenterX = basket.right - (basketWidth * 0.11f)
+            val rimCenterY = basket.top + (basketHeight * 0.06f)
+
+            val rimCircleRadius = basketWidth * 0.075f
+
+            val hitLeftRim = isBallTouchingRimCircle(
+                ball = result,
+                rimCenterX = leftRimCenterX,
+                rimCenterY = rimCenterY,
+                rimRadius = rimCircleRadius
+            )
+
+            val hitRightRim = isBallTouchingRimCircle(
+                ball = result,
+                rimCenterX = rightRimCenterX,
+                rimCenterY = rimCenterY,
+                rimRadius = rimCircleRadius
+            )
+
+            val descending = result.speed + result.velocityY > 0.8f
+            if (!descending) return@forEach
+
+            result = when {
+                hitLeftRim -> {
+                    result.copy(
+                        x = basket.left + result.radius * 0.3f,
+                        y = basket.top + basketHeight * 0.10f,
+                        velocityX = -abs(result.velocityX).coerceAtLeast(2.4f),
+                        velocityY = abs(result.velocityY).coerceAtLeast(9.5f),
+                        rimBounceCooldownFrames = 10,
+                        rimRejected = true
+                    )
+                }
+
+                hitRightRim -> {
+                    result.copy(
+                        x = basket.right - result.radius * 0.3f,
+                        y = basket.top + basketHeight * 0.10f,
+                        velocityX = abs(result.velocityX).coerceAtLeast(2.4f),
+                        velocityY = abs(result.velocityY).coerceAtLeast(9.5f),
+                        rimBounceCooldownFrames = 10,
+                        rimRejected = true
+                    )
+                }
+
+                else -> result
+            }
+        }
+
+        return result
+    }
+
+    private fun isBallTouchingRimCircle(
+        ball: BallItem,
+        rimCenterX: Float,
+        rimCenterY: Float,
+        rimRadius: Float
+    ): Boolean {
+        val dx = ball.x - rimCenterX
+        val dy = ball.y - rimCenterY
+        val distance = hypot(dx, dy)
+        return distance <= (ball.radius + rimRadius)
+    }
+
+    private fun applyBasketPointPhysics(
+        ball: BallItem
+    ): BallItem {
+        if (uiState.baskets.isEmpty()) return ball
+        if (ball.rimBounceCooldownFrames > 0) return ball
+        if (ball.rimRejected) return ball
+
+        var result = ball
+
+        uiState.baskets.forEach { basket ->
+            val basketWidth = basket.right - basket.left
+            val basketHeight = basket.bottom - basket.top
+            val basketCenterX = (basket.left + basket.right) / 2f
+
+            // Senin yeşil gösterdiğin iki küçük temas noktası
+            val leftPointX = basket.left + (basketWidth * 0.12f)
+            val rightPointX = basket.right - (basketWidth * 0.12f)
+            val pointY = basket.top + (basketHeight * 0.04f)
+
+            // Temas alanı gerçekten küçük olsun
+            val pointRadius = basketWidth * 0.022f
+
+            // Bu iki noktanın arası skor koridoru
+            val scoringLeft = leftPointX + pointRadius * 1.6f
+            val scoringRight = rightPointX - pointRadius * 1.6f
+
+            val ballBottom = result.y + result.radius
+
+            // Top zaten skor koridorunun içine girdiyse artık fizik uygulama
+            val alreadyInsideScoringCorridor =
+                result.x in scoringLeft..scoringRight &&
+                        ballBottom > basket.top + (basketHeight * 0.08f)
+
+            if (alreadyInsideScoringCorridor) return@forEach
+
+            val incomingVX = result.velocityX
+            val incomingVY =
+                (result.speed * currentFallMultiplier() + result.velocityY).coerceAtLeast(2.5f)
+
+            val incomingSpeed = hypot(incomingVX, incomingVY).coerceAtLeast(4f)
+
+            if (incomingVY <= 0.5f) return@forEach
+
+            fun resolvePointHit(
+                pointCenterX: Float,
+                isLeftPoint: Boolean
+            ): BallItem? {
+                val dx = result.x - pointCenterX
+                val dy = result.y - pointY
+                val distance = hypot(dx, dy)
+
+                val touching = distance <= (result.radius + pointRadius)
+                if (!touching) return null
+
+                // Temas noktasından top merkezine normal
+                val rawNormalX = if (distance > 0.001f) dx / distance else if (isLeftPoint) -1f else 1f
+                val rawNormalY = if (distance > 0.001f) dy / distance else -0.15f
+
+                val normalLength = hypot(rawNormalX, rawNormalY).coerceAtLeast(0.0001f)
+                val nx = rawNormalX / normalLength
+                val ny = rawNormalY / normalLength
+
+                // Vektörü normale göre yansıt
+                val dot = incomingVX * nx + incomingVY * ny
+                val reflectedX = incomingVX - 2f * dot * nx
+                val reflectedY = incomingVY - 2f * dot * ny
+
+                val goesTowardCenter = if (isLeftPoint) {
+                    reflectedX > 0.20f
+                } else {
+                    reflectedX < -0.20f
+                }
+
+                return if (goesTowardCenter) {
+                    val inwardX = maxOf(abs(reflectedX), incomingSpeed * 0.8f)
+                    val inwardHopY = maxOf(incomingSpeed * 5.50f, 18f)
+
+                    result.copy(
+                        x = if (isLeftPoint) {
+                            scoringLeft + result.radius * 0.95f
+                        } else {
+                            scoringRight - result.radius * 0.95f
+                        },
+                        y = basket.top + (basketHeight * 0.10f),
+                        velocityX = if (isLeftPoint) inwardX else -inwardX,
+                        velocityY = -inwardHopY,
+                        rimBounceCooldownFrames = 7
+                    )
+                } else {
+                    val outwardX = maxOf(abs(reflectedX), incomingSpeed * 0.2f)
+                    val outwardHopY = maxOf(incomingSpeed * 2f, 12f)
+
+                    result.copy(
+                        x = if (isLeftPoint) {
+                            basket.left - result.radius * 0.55f
+                        } else {
+                            basket.right + result.radius * 0.55f
+                        },
+                        y = basket.top - result.radius * 0.10f,
+                        velocityX = if (isLeftPoint) -outwardX else outwardX,
+                        velocityY = -outwardHopY,
+                        rimBounceCooldownFrames = 10,
+                        rimRejected = true
+                    )
+                }
+            }
+
+            val resolvedLeft = resolvePointHit(
+                pointCenterX = leftPointX,
+                isLeftPoint = true
+            )
+
+            if (resolvedLeft != null) {
+                result = resolvedLeft
+                return@forEach
+            }
+
+            val resolvedRight = resolvePointHit(
+                pointCenterX = rightPointX,
+                isLeftPoint = false
+            )
+
+            if (resolvedRight != null) {
+                result = resolvedRight
+                return@forEach
+            }
+        }
+
+        return result
+    }
+
+    private fun isBallTouchingEntryPointCircle(
+        ball: BallItem,
+        pointCenterX: Float,
+        pointCenterY: Float,
+        pointRadius: Float
+    ): Boolean {
+        val distance = hypot(ball.x - pointCenterX, ball.y - pointCenterY)
+        return distance <= (ball.radius + pointRadius)
+    }
+
     private fun isPointInsideBall(
         x: Float,
         y: Float,
@@ -819,23 +1162,29 @@ class GameController {
         ball: BallItem,
         basket: Basket
     ): Boolean {
+        if (ball.rimRejected) return false
+
         val basketWidth = basket.right - basket.left
         val basketHeight = basket.bottom - basket.top
 
-        val innerLeft = basket.left + (basketWidth * 0.12f)
-        val innerRight = basket.right - (basketWidth * 0.12f)
+        val leftPointX = basket.left + (basketWidth * 0.15f)
+        val rightPointX = basket.right - (basketWidth * 0.15f)
+        val pointRadius = basketWidth * 0.022f
 
-        val entryTop = basket.top - (ball.radius * 0.35f)
-        val entryBottom = basket.top + (basketHeight * 0.32f)
+        val scoringLeft = leftPointX + pointRadius * 1.4f
+        val scoringRight = rightPointX - pointRadius * 1.4f
 
-        val centerInsideEntryWidth =
-            ball.x >= innerLeft && ball.x <= innerRight
+        // Biraz affedici skor bandı
+        val captureTop = basket.top + (basketHeight * 0.10f)
+        val captureBottom = basket.top + (basketHeight * 0.52f)
 
+        val centerInsideOpening = ball.x in scoringLeft..scoringRight
         val ballBottom = ball.y + ball.radius
-        val crossedEntryBand =
-            ballBottom >= entryTop && ballBottom <= entryBottom
+        val insideCaptureBand = ballBottom in captureTop..captureBottom
 
-        return centerInsideEntryWidth && crossedEntryBand
+        val descending = (ball.speed + ball.velocityY) > 0.1f
+
+        return centerInsideOpening && insideCaptureBand && descending
     }
 
     private fun currentSpawnIntervalMillis(): Long {

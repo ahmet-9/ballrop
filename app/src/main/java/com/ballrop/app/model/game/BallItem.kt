@@ -18,5 +18,7 @@ data class BallItem(
     val justCaptured: Boolean = false,
     val movementType: BallMovementType = BallMovementType.STRAIGHT,
     val movementPhase: Float = 0f,
-    val lockedToPattern: Boolean = false
+    val lockedToPattern: Boolean = false,
+    val rimBounceCooldownFrames: Int = 0,
+    val rimRejected: Boolean = false
 )
