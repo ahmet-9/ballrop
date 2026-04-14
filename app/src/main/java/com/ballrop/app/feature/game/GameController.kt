@@ -296,7 +296,7 @@ class GameController {
 
         if (now - lastSpawnTimeMillis < interval) return
 
-        val radius = (uiState.canvasWidth * 0.052f).coerceIn(22f, 38f)
+        val radius = (uiState.canvasWidth * 0.052f).coerceIn(26f, 48f)
         val minX = radius
         val maxX = uiState.canvasWidth - radius
 
