@@ -70,6 +70,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -312,14 +313,25 @@ fun GameScreen(
                             debugPanelOffsetY += dragY
                         },
                         onNextLevelClick = {
-                            val nextLevel = uiState.currentLevel + 1
-                            val debugCheckpointStartLevel = calculateCheckpointStartLevelForLevel(nextLevel)
+                            val totalPartCount = uiState.totalPartCount
+                            val isLastPart = uiState.currentPart >= totalPartCount
 
-                            progressStorage.saveCheckpointStartLevel(debugCheckpointStartLevel)
-                            checkpointStartLevel = debugCheckpointStartLevel
+                            if (isLastPart) {
+                                val nextLevel = uiState.currentLevel + 1
+                                val debugCheckpointStartLevel = calculateCheckpointStartLevelForLevel(nextLevel)
 
-                            controller.onAction(GameAction.NextLevel)
-                            controller.onAction(GameAction.StartGame)
+                                progressStorage.saveCheckpointStartLevel(debugCheckpointStartLevel)
+                                checkpointStartLevel = debugCheckpointStartLevel
+
+                                controller.onAction(GameAction.NextLevel)
+                                controller.onAction(GameAction.StartGame)
+                            } else {
+                                val simulatedTarget = uiState.targetCorrectCountForActivePart
+
+                                repeat(simulatedTarget.coerceAtLeast(1)) {
+                                    controller.onAction(GameAction.DebugAddCorrectCatch)
+                                }
+                            }
                         },
                         onAddLivesClick = {
                             controller.onAction(GameAction.DebugAddLives)
@@ -351,13 +363,20 @@ private fun GameTopBar(
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(BallropDimens.Space12),
+            horizontalArrangement = Arrangement.spacedBy(BallropDimens.Space8),
             verticalAlignment = Alignment.CenterVertically
         ) {
             InfoCard(
                 title = "Level",
                 value = uiState.currentLevel.toString(),
                 modifier = Modifier.weight(1f)
+            )
+
+            InfoCard(
+                title = "Part",
+                value = "${uiState.currentPart}/${uiState.totalPartCount}",
+                modifier = Modifier.weight(1f),
+                highlighted = true
             )
 
             InfoCard(
@@ -376,7 +395,7 @@ private fun GameTopBar(
         }
 
         Text(
-            text = "Skor ${uiState.score}",
+            text = "Skor ${uiState.score}  •  Hedef Kalan ${uiState.remainingTargetCount}",
             style = MaterialTheme.typography.labelLarge,
             color = BallropColors.TextSecondary,
             modifier = Modifier.padding(start = BallropDimens.Space4)
@@ -1143,3 +1162,4 @@ private fun calculateCheckpointStartLevelForLevel(level: Int): Int {
     val checkpointBlockStart = ((safeLevel - 1) / 3) * 3 + 1
     return checkpointBlockStart
 }
+

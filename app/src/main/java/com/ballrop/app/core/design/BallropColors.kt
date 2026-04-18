@@ -12,7 +12,8 @@ object BallropColors {
     // Brand / Game colors
     val BasketBlue = Color(0xFF3B82F6)
     val BasketBlueDark = Color(0xFF1D4ED8)
-
+    val BallGreen = Color(0xFF4CAF50)
+    val BasketGreen = Color(0xFF43A047)
     val BasketRed = Color(0xFFEF4444)
     val BasketRedDark = Color(0xFFB91C1C)
 

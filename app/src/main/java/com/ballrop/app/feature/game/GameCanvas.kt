@@ -11,7 +11,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -19,6 +19,8 @@ import com.ballrop.app.R
 import com.ballrop.app.core.design.BallropColors
 import com.ballrop.app.model.game.BallColor
 import com.ballrop.app.model.game.BallKind
+import android.graphics.Paint
+import android.graphics.Typeface
 
 @Composable
 fun GameCanvas(
@@ -27,6 +29,7 @@ fun GameCanvas(
 ) {
     val redBasketBitmap = ImageBitmap.imageResource(id = R.drawable.basket_red)
     val blueBasketBitmap = ImageBitmap.imageResource(id = R.drawable.basket_blue)
+    val greenBasketBitmap = ImageBitmap.imageResource(id = R.drawable.basket_green)
 
     Canvas(
         modifier = modifier.fillMaxSize()
@@ -133,28 +136,67 @@ fun GameCanvas(
             center = Offset(canvasWidth * 0.82f, canvasHeight * 0.30f)
         )
 
+        // Büyük silik kalan hedef sayısı
+        val remainingTarget = uiState.remainingTargetCount.coerceAtLeast(0).toString()
+        val bigTextPaint = Paint().apply {
+            isAntiAlias = true
+            color = android.graphics.Color.argb(28, 255, 255, 255)
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create(Typeface.DEFAULT_BOLD, Typeface.BOLD)
+            textSize = (canvasWidth * 0.42f).coerceIn(120f, 240f)
+        }
+
+        val subTextPaint = Paint().apply {
+            isAntiAlias = true
+            color = android.graphics.Color.argb(20, 255, 255, 255)
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+            textSize = (canvasWidth * 0.05f).coerceIn(18f, 28f)
+        }
+
+        drawContext.canvas.nativeCanvas.apply {
+            val bigX = canvasWidth * 0.5f
+            val bigY = canvasHeight * 0.43f
+
+            drawText(
+                remainingTarget,
+                bigX,
+                bigY,
+                bigTextPaint
+            )
+
+            drawText(
+                "KALAN",
+                bigX,
+                bigY + (canvasWidth * 0.11f),
+                subTextPaint
+            )
+        }
+
         uiState.baskets.forEach { basket ->
             val basketWidth = basket.right - basket.left
             val basketHeight = basket.bottom - basket.top
 
-            val visualLeft = basket.left - (basketWidth * 0.08f)
-            val visualTop = basket.top - (basketHeight * 0.22f)
-
+            val basketCenterX = (basket.left + basket.right) / 2f
 
             val aspectRatio = 0.9f
-
-            val visualWidth = basketWidth * 1.20f
+            val visualWidth = basketWidth * 1.18f
             val visualHeight = visualWidth * aspectRatio
+
+            val visualLeft = basketCenterX - (visualWidth / 2f)
+            val visualTop = basket.top - (basketHeight * 0.22f)
 
             val basketBitmap = when (basket.color) {
                 BallColor.BLUE -> blueBasketBitmap
                 BallColor.RED -> redBasketBitmap
+                BallColor.GREEN -> greenBasketBitmap
             }
 
             if (basket.glowAlpha > 0f) {
                 val glowColor = when (basket.color) {
                     BallColor.BLUE -> BallropColors.BasketBlue
                     BallColor.RED -> BallropColors.BasketRed
+                    BallColor.GREEN -> BallropColors.BasketGreen
                 }
 
                 drawRoundRect(
@@ -191,40 +233,49 @@ fun GameCanvas(
 
             val baseColor = when (ball.kind) {
                 BallKind.BONUS -> BallropColors.Warning
-                BallKind.DANGER -> BallropColors.Black
+                BallKind.BOMB -> BallropColors.Black
+                BallKind.ICE -> BallropColors.BallBlue
+                BallKind.COLOR_SHIFT,
+                BallKind.SPLIT,
                 BallKind.NORMAL -> {
                     when (ball.color) {
                         BallColor.BLUE -> BallropColors.BallBlue
                         BallColor.RED -> BallropColors.BallRed
+                        BallColor.GREEN -> BallropColors.BallGreen
                     }
                 }
             }
 
             val outerGlowColor = when (ball.kind) {
                 BallKind.BONUS -> BallropColors.Warning.copy(alpha = 0.26f)
-                BallKind.DANGER -> BallropColors.White.copy(alpha = 0.08f)
+                BallKind.BOMB -> BallropColors.White.copy(alpha = 0.08f)
+                BallKind.ICE -> BallropColors.BallBlue.copy(alpha = 0.24f)
+                BallKind.COLOR_SHIFT,
+                BallKind.SPLIT,
                 BallKind.NORMAL -> {
                     when (ball.color) {
                         BallColor.BLUE -> BallropColors.BallBlue.copy(alpha = 0.18f)
                         BallColor.RED -> BallropColors.BallRed.copy(alpha = 0.18f)
+                        BallColor.GREEN -> BallropColors.BallGreen.copy(alpha = 0.18f)
                     }
                 }
             }
 
             val rimColor = when (ball.kind) {
                 BallKind.BONUS -> BallropColors.White.copy(alpha = 0.34f)
-                BallKind.DANGER -> BallropColors.White.copy(alpha = 0.18f)
+                BallKind.BOMB -> BallropColors.White.copy(alpha = 0.18f)
+                BallKind.ICE -> BallropColors.White.copy(alpha = 0.30f)
+                BallKind.COLOR_SHIFT,
+                BallKind.SPLIT,
                 BallKind.NORMAL -> BallropColors.White.copy(alpha = 0.24f)
             }
 
-            // 1) dış aura
             drawCircle(
                 color = outerGlowColor,
                 radius = scaledRadius * 1.24f,
                 center = center
             )
 
-            // 2) alt gölge
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
@@ -241,7 +292,6 @@ fun GameCanvas(
                 center = Offset(center.x, center.y + scaledRadius * 0.16f)
             )
 
-            // 3) ana küre gövdesi
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
@@ -260,7 +310,6 @@ fun GameCanvas(
                 center = center
             )
 
-            // 4) küre alt derinlik katmanı
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
@@ -278,7 +327,6 @@ fun GameCanvas(
                 center = center
             )
 
-            // 5) geniş üst yansıma
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
@@ -299,7 +347,6 @@ fun GameCanvas(
                 )
             )
 
-            // 6) keskin parlama noktası
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
@@ -320,7 +367,6 @@ fun GameCanvas(
                 )
             )
 
-            // 7) ince cam yansıma yayı
             drawArc(
                 color = BallropColors.White.copy(alpha = 0.20f),
                 startAngle = 210f,
@@ -331,7 +377,6 @@ fun GameCanvas(
                 style = Stroke(width = scaledRadius * 0.10f)
             )
 
-            // 8) alt iç parlama - gerçek cam hissi
             drawArc(
                 color = BallropColors.White.copy(alpha = 0.11f),
                 startAngle = 20f,
@@ -345,7 +390,6 @@ fun GameCanvas(
                 style = Stroke(width = scaledRadius * 0.08f)
             )
 
-            // 9) dış rim
             drawCircle(
                 color = rimColor,
                 radius = scaledRadius,
@@ -353,7 +397,6 @@ fun GameCanvas(
                 style = Stroke(width = scaledRadius * 0.09f)
             )
 
-            // 10) bonus top ekstra premium halka
             if (ball.kind == BallKind.BONUS) {
                 drawCircle(
                     color = BallropColors.White.copy(alpha = 0.18f),
@@ -363,8 +406,7 @@ fun GameCanvas(
                 )
             }
 
-            // 11) danger top obsidyen hissi
-            if (ball.kind == BallKind.DANGER) {
+            if (ball.kind == BallKind.BOMB) {
                 drawArc(
                     color = BallropColors.White.copy(alpha = 0.16f),
                     startAngle = 230f,
@@ -403,7 +445,54 @@ fun GameCanvas(
                     cap = StrokeCap.Round
                 )
             }
+
+            if (ball.kind == BallKind.ICE) {
+                drawCircle(
+                    color = BallropColors.White.copy(alpha = 0.16f),
+                    radius = scaledRadius * 0.74f,
+                    center = center,
+                    style = Stroke(width = scaledRadius * 0.08f)
+                )
+
+                drawLine(
+                    color = BallropColors.White.copy(alpha = 0.78f),
+                    start = Offset(center.x, center.y - scaledRadius * 0.42f),
+                    end = Offset(center.x, center.y + scaledRadius * 0.42f),
+                    strokeWidth = scaledRadius * 0.08f,
+                    cap = StrokeCap.Round
+                )
+
+                drawLine(
+                    color = BallropColors.White.copy(alpha = 0.78f),
+                    start = Offset(center.x - scaledRadius * 0.34f, center.y),
+                    end = Offset(center.x + scaledRadius * 0.34f, center.y),
+                    strokeWidth = scaledRadius * 0.08f,
+                    cap = StrokeCap.Round
+                )
+            }
+
+            if (ball.kind == BallKind.COLOR_SHIFT) {
+                drawArc(
+                    color = BallropColors.White.copy(alpha = 0.26f),
+                    startAngle = 35f,
+                    sweepAngle = 290f,
+                    useCenter = false,
+                    topLeft = Offset(center.x - scaledRadius * 0.76f, center.y - scaledRadius * 0.76f),
+                    size = Size(scaledRadius * 1.52f, scaledRadius * 1.52f),
+                    style = Stroke(width = scaledRadius * 0.08f)
+                )
+            }
+
+            if (ball.kind == BallKind.SPLIT) {
+                drawLine(
+                    color = BallropColors.White.copy(alpha = 0.78f),
+                    start = Offset(center.x, center.y - scaledRadius * 0.34f),
+                    end = Offset(center.x, center.y + scaledRadius * 0.34f),
+                    strokeWidth = scaledRadius * 0.08f,
+                    cap = StrokeCap.Round
+                )
+            }
         }
     }
-}
 
+}

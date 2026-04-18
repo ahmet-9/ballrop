@@ -35,5 +35,32 @@ data class LevelConfig(
     val allowedPatternTypes: List<SpawnPatternType> = listOf(SpawnPatternType.SINGLE),
     val multiBallWaveChance: Float = 0f,
     val featuredPatternType: SpawnPatternType? = null,
-    val featuredPatternChance: Float = 0f
-)
+    val featuredPatternChance: Float = 0f,
+
+    // Yeni sistem
+    val levelNumber: Int = 1,
+    val parts: List<LevelPartConfig> = emptyList()
+) {
+    fun partOrNull(partNumber: Int): LevelPartConfig? {
+        return parts.firstOrNull { it.partNumber == partNumber }
+    }
+
+    fun partOrFirst(partNumber: Int): LevelPartConfig {
+        return partOrNull(partNumber) ?: parts.firstOrNull() ?: LevelPartConfig(
+            partNumber = 1,
+            targetCorrectCount = targetCorrectCount,
+            maxMistakesAllowed = 5,
+            colorCount = 2,
+            basketMotionMode = BasketMotionMode.NONE,
+            spawnIntervalMillis = spawnIntervalMillis,
+            baseFallSpeedPercent = 20,
+            flowBlocks = listOf(
+                LevelFlowBlock(
+                    type = LevelFlowBlockType.BALL_BLOCK,
+                    entries = listOf(SpawnMixEntry(1, 100)),
+                    progressPercent = 100
+                )
+            )
+        )
+    }
+}

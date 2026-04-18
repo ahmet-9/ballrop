@@ -20,5 +20,11 @@ data class BallItem(
     val movementPhase: Float = 0f,
     val lockedToPattern: Boolean = false,
     val rimBounceCooldownFrames: Int = 0,
-    val rimRejected: Boolean = false
+    val rimRejected: Boolean = false,
+
+    // Yeni alanlar
+    val spawnCode: Int = 1,
+    val targetColor: BallColor = color,
+    val colorRevealLocked: Boolean = true,
+    val splitTriggered: Boolean = false
 )
