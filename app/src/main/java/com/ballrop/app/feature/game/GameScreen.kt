@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -24,7 +23,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -42,9 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.layout.heightIn
+
 import androidx.compose.runtime.mutableFloatStateOf
 
 import com.ballrop.app.feature.game.components.GameDebugPanel
@@ -60,24 +56,22 @@ import androidx.compose.foundation.border
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.runtime.getValue
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.graphicsLayer
 
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import kotlin.math.cos
-import kotlin.math.sin
+
+import androidx.compose.foundation.layout.height
+
+import androidx.compose.foundation.layout.width
+
+
+import com.ballrop.app.feature.game.components.GameLivesOverlay
 
 
 
-
-
+import androidx.compose.ui.graphics.Path
 
 private const val DEBUG_PANEL_ENABLED = true
 
@@ -111,6 +105,18 @@ fun GameScreen(
                 level = uiState.currentLevel
             )
         }
+
+        if (uiState.status == GameStatus.GAME_OVER) {
+            progressStorage.clearResumeProgress()
+            progressStorage.saveCheckpointStartLevel(uiState.currentLevel)
+            checkpointStartLevel = uiState.currentLevel
+        }
+
+        if (uiState.status == GameStatus.LEVEL_COMPLETED) {
+            progressStorage.clearResumeProgress()
+            progressStorage.saveCheckpointStartLevel(uiState.currentLevel + 1)
+            checkpointStartLevel = uiState.currentLevel + 1
+        }
     }
     LaunchedEffect(uiState.status, uiState.currentLevel) {
         if (uiState.status == GameStatus.LEVEL_COMPLETED) {
@@ -127,9 +133,24 @@ fun GameScreen(
     }
 
     LaunchedEffect(startLevel) {
-        checkpointStartLevel = progressStorage.getCheckpointStartLevel()
+        checkpointStartLevel = progressStorage.getContinueLevel()
 
-        if (startLevel > 1) {
+        if (startLevel > 1 && progressStorage.hasResumeProgress()) {
+            controller.onAction(
+                GameAction.StartFromProgress(
+                    level = progressStorage.getResumeLevel(),
+                    part = progressStorage.getResumePart(),
+                    correctPlacedCount = progressStorage.getResumeCorrectPlacedCount(),
+                    missedCount = progressStorage.getResumeMissedCount(),
+                    wrongCount = progressStorage.getResumeWrongCount(),
+                    flowBlockIndex = progressStorage.getResumeFlowBlockIndex(),
+                    flowBlockSpawnCount = progressStorage.getResumeFlowBlockSpawnCount(),
+                    flowShapeConsumed = progressStorage.getResumeFlowShapeConsumed(),
+                    flowShapePreGapCompleted = progressStorage.getResumeFlowShapePreGapCompleted(),
+                    flowShapePostGapCompleted = progressStorage.getResumeFlowShapePostGapCompleted()
+                )
+            )
+        } else if (startLevel > 1) {
             controller.onAction(GameAction.StartFromLevel(startLevel))
         } else {
             controller.onAction(GameAction.ResetGame)
@@ -154,251 +175,427 @@ fun GameScreen(
         }
     }
 
-    Column(
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(BallropColors.BackgroundPrimary)
-            .statusBarsPadding()
-            .padding(horizontal = BallropDimens.Space16)
-            .padding(top = BallropDimens.Space12, bottom = BallropDimens.Space12)
     ) {
-        GameTopBar(
-            uiState = uiState,
-            onPauseClick = {
-                if (uiState.status == GameStatus.PLAYING) {
-                    controller.onAction(GameAction.PauseGame)
-                } else if (uiState.status == GameStatus.PAUSED) {
-                    controller.onAction(GameAction.ResumeGame)
-                }
-            }
-        )
-
-        BoxWithConstraints(
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .padding(top = BallropDimens.Space12)
+                .fillMaxSize()
+                .statusBarsPadding()
+                .padding(horizontal = BallropDimens.Space16)
+                .padding(top = BallropDimens.Space12, bottom = BallropDimens.Space12)
         ) {
-            val widthPx = constraints.maxWidth.toFloat()
-            val heightPx = constraints.maxHeight.toFloat()
+            GameHeader(
+                uiState = uiState,
+                onPauseClick = {
+                    if (uiState.status == GameStatus.PLAYING) {
+                        controller.onAction(GameAction.PauseGame)
+                    } else if (uiState.status == GameStatus.PAUSED) {
+                        controller.onAction(GameAction.ResumeGame)
+                    }
+                }
+            )
 
-            LaunchedEffect(widthPx, heightPx) {
-                controller.onAction(
-                    GameAction.UpdateCanvasSize(
-                        width = widthPx,
-                        height = heightPx
-                    )
-                )
-            }
-
-            Box(
+            BoxWithConstraints(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(uiState.status) {
-                        if (uiState.status != GameStatus.PLAYING) return@pointerInput
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(top = 0.dp)
+            ){
+                val widthPx = constraints.maxWidth.toFloat()
+                val heightPx = constraints.maxHeight.toFloat()
 
-                        awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
-                            controller.onAction(
-                                GameAction.PointerDown(
-                                    x = down.position.x,
-                                    y = down.position.y
-                                )
-                            )
+                LaunchedEffect(widthPx, heightPx) {
+                    controller.onAction(
+                        GameAction.UpdateCanvasSize(
+                            width = widthPx,
+                            height = heightPx
+                        )
+                    )
+                }
 
-                            val pointerId = down.id
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(uiState.status) {
+                            if (uiState.status != GameStatus.PLAYING) return@pointerInput
 
-                            while (true) {
-                                val event = awaitPointerEvent()
-                                val change = event.changes.firstOrNull { it.id == pointerId }
-                                    ?: break
-
-                                if (!change.pressed) {
-                                    controller.onAction(GameAction.PointerUp)
-                                    break
-                                }
-
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
                                 controller.onAction(
-                                    GameAction.PointerMove(
-                                        x = change.position.x,
-                                        y = change.position.y
+                                    GameAction.PointerDown(
+                                        x = down.position.x,
+                                        y = down.position.y
                                     )
                                 )
 
-                                change.consume()
+                                val pointerId = down.id
+
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == pointerId }
+                                        ?: break
+
+                                    if (!change.pressed) {
+                                        controller.onAction(GameAction.PointerUp)
+                                        break
+                                    }
+
+                                    controller.onAction(
+                                        GameAction.PointerMove(
+                                            x = change.position.x,
+                                            y = change.position.y
+                                        )
+                                    )
+
+                                    change.consume()
+                                }
                             }
                         }
-                    }
-            ) {
-                GameCanvas(
-                    modifier = Modifier.fillMaxSize(),
-                    uiState = uiState
-                )
-
-                FeedbackPopups(uiState = uiState)
-
-                ImpactOverlay(
-                    impactOverlay = uiState.impactOverlay
-                )
-
-                when (uiState.status) {
-                    GameStatus.PAUSED -> {
-                        PauseOverlay(
-                            checkpointStartLevel = checkpointStartLevel,
-                            onResumeClick = {
-                                controller.onAction(GameAction.ResumeGame)
-                            },
-                            onRestartClick = {
-                                val restartLevel = checkpointStartLevel.coerceAtLeast(1)
-                                controller.onAction(GameAction.StartFromLevel(restartLevel))
-                                controller.onAction(GameAction.StartGame)
-                            },
-                            onExitToMenuClick = onExitToMenu
-                        )
-                    }
-
-                    GameStatus.LEVEL_COMPLETED -> {
-                        LevelCompleteOverlay(
-                            uiState = uiState,
-                            checkpointInfo = buildCheckpointInfo(
-                                completedLevel = uiState.currentLevel,
-                                savedCheckpointStartLevel = checkpointStartLevel
-                            ),
-                            onContinueClick = {
-                                if (uiState.currentLevel % 3 == 0) {
-                                    val nextCheckpointStartLevel = uiState.currentLevel + 1
-                                    progressStorage.saveCheckpointStartLevel(nextCheckpointStartLevel)
-                                    checkpointStartLevel = nextCheckpointStartLevel
-                                }
-
-                                controller.onAction(GameAction.NextLevel)
-                                controller.onAction(GameAction.StartGame)
-                            },
-                            onExitToMenuClick = {
-                                if (uiState.currentLevel % 3 == 0) {
-                                    val nextCheckpointStartLevel = uiState.currentLevel + 1
-                                    progressStorage.saveCheckpointStartLevel(nextCheckpointStartLevel)
-                                    checkpointStartLevel = nextCheckpointStartLevel
-                                }
-
-                                onExitToMenu()
-                            }
-                        )
-                    }
-
-                    GameStatus.GAME_OVER -> {
-                        GameOverOverlay(
-                            uiState = uiState,
-                            checkpointStartLevel = checkpointStartLevel,
-                            onRestartClick = {
-                                val restartLevel = checkpointStartLevel.coerceAtLeast(1)
-                                controller.onAction(GameAction.StartFromLevel(restartLevel))
-                                controller.onAction(GameAction.StartGame)
-                            },
-                            onExitToMenuClick = onExitToMenu
-                        )
-                    }
-
-                    else -> Unit
-                }
-                if (DEBUG_PANEL_ENABLED) {
-                    GameDebugPanel(
-                        currentLevel = uiState.currentLevel,
-                        remainingLives = uiState.remainingLives,
-                        checkpointStartLevel = checkpointStartLevel,
-                        panelOffsetX = debugPanelOffsetX,
-                        panelOffsetY = debugPanelOffsetY,
-                        onPanelDrag = { dragX, dragY ->
-                            debugPanelOffsetX += dragX
-                            debugPanelOffsetY += dragY
-                        },
-                        onNextLevelClick = {
-                            val totalPartCount = uiState.totalPartCount
-                            val isLastPart = uiState.currentPart >= totalPartCount
-
-                            if (isLastPart) {
-                                val nextLevel = uiState.currentLevel + 1
-                                val debugCheckpointStartLevel = calculateCheckpointStartLevelForLevel(nextLevel)
-
-                                progressStorage.saveCheckpointStartLevel(debugCheckpointStartLevel)
-                                checkpointStartLevel = debugCheckpointStartLevel
-
-                                controller.onAction(GameAction.NextLevel)
-                                controller.onAction(GameAction.StartGame)
-                            } else {
-                                val simulatedTarget = uiState.targetCorrectCountForActivePart
-
-                                repeat(simulatedTarget.coerceAtLeast(1)) {
-                                    controller.onAction(GameAction.DebugAddCorrectCatch)
-                                }
-                            }
-                        },
-                        onAddLivesClick = {
-                            controller.onAction(GameAction.DebugAddLives)
-                        },
-                        onRestartFromCheckpointClick = {
-                            val restartLevel = checkpointStartLevel.coerceAtLeast(1)
-
-                            controller.onAction(GameAction.StartFromLevel(restartLevel))
-                            controller.onAction(GameAction.StartGame)
-                        },
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(BallropDimens.Space12)
+                ) {
+                    GameCanvas(
+                        modifier = Modifier.fillMaxSize(),
+                        uiState = uiState
                     )
+
+                    FeedbackPopups(uiState = uiState)
+
+                    ImpactOverlay(
+                        impactOverlay = uiState.impactOverlay
+                    )
+
+                    when (uiState.status) {
+                        GameStatus.PAUSED -> {
+                            PauseOverlay(
+                                checkpointStartLevel = checkpointStartLevel,
+                                onResumeClick = {
+                                    controller.onAction(GameAction.ResumeGame)
+                                },
+                                onRestartClick = {
+                                    val restartLevel = checkpointStartLevel.coerceAtLeast(1)
+                                    controller.onAction(GameAction.StartFromLevel(restartLevel))
+                                    controller.onAction(GameAction.StartGame)
+                                },
+                                onExitToMenuClick = {
+                                    val flowSnapshot = controller.currentFlowSnapshot()
+                                    progressStorage.saveResumeProgress(
+                                        level = uiState.currentLevel,
+                                        part = uiState.currentPart,
+                                        correctPlacedCount = uiState.correctPlacedCount,
+                                        missedCount = uiState.missedCount,
+                                        wrongCount = uiState.wrongCount,
+                                        maxMistakesAllowed = uiState.maxMistakesAllowed,
+                                        targetCorrectCount = uiState.levelConfig.partOrFirst(uiState.currentPart).targetCorrectCount,
+                                        flowBlockIndex = flowSnapshot.currentBlockIndex,
+                                        flowBlockSpawnCount = flowSnapshot.currentBlockSpawnCount,
+                                        flowShapeConsumed = flowSnapshot.shapeConsumedForCurrentBlock,
+                                        flowShapePreGapCompleted = flowSnapshot.shapePreGapCompleted,
+                                        flowShapePostGapCompleted = flowSnapshot.shapePostGapCompleted
+                                    )
+                                    checkpointStartLevel = uiState.currentLevel
+                                    onExitToMenu()
+                                }
+                            )
+                        }
+
+                        GameStatus.LEVEL_COMPLETED -> {
+                            LevelCompleteOverlay(
+                                uiState = uiState,
+                                checkpointInfo = buildCheckpointInfo(
+                                    completedLevel = uiState.currentLevel,
+                                    savedCheckpointStartLevel = checkpointStartLevel
+                                ),
+                                onContinueClick = {
+                                    if (uiState.currentLevel % 3 == 0) {
+                                        val nextCheckpointStartLevel = uiState.currentLevel + 1
+                                        progressStorage.saveCheckpointStartLevel(
+                                            nextCheckpointStartLevel
+                                        )
+                                        checkpointStartLevel = nextCheckpointStartLevel
+                                    }
+
+                                    controller.onAction(GameAction.NextLevel)
+                                    controller.onAction(GameAction.StartGame)
+                                },
+                                onExitToMenuClick = {
+                                    if (uiState.currentLevel % 3 == 0) {
+                                        val nextCheckpointStartLevel = uiState.currentLevel + 1
+                                        progressStorage.saveCheckpointStartLevel(
+                                            nextCheckpointStartLevel
+                                        )
+                                        checkpointStartLevel = nextCheckpointStartLevel
+                                    }
+
+                                    onExitToMenu()
+                                }
+                            )
+                        }
+
+                        GameStatus.GAME_OVER -> {
+                            GameOverOverlay(
+                                uiState = uiState,
+                                checkpointStartLevel = checkpointStartLevel,
+                                onRestartClick = {
+                                    progressStorage.clearResumeProgress()
+                                    progressStorage.saveCheckpointStartLevel(uiState.currentLevel)
+
+                                    controller.onAction(GameAction.StartFromLevel(uiState.currentLevel))
+                                    controller.onAction(GameAction.StartGame)
+                                },
+                                onExitToMenuClick = onExitToMenu
+                            )
+                        }
+
+                        else -> Unit
+                    }
+
+                    if (DEBUG_PANEL_ENABLED) {
+                        GameDebugPanel(
+                            currentLevel = uiState.currentLevel,
+                            remainingLives = uiState.remainingLives,
+                            checkpointStartLevel = checkpointStartLevel,
+                            panelOffsetX = debugPanelOffsetX,
+                            panelOffsetY = debugPanelOffsetY,
+                            onPanelDrag = { dragX, dragY ->
+                                debugPanelOffsetX += dragX
+                                debugPanelOffsetY += dragY
+                            },
+                            onNextLevelClick = {
+                                val totalPartCount = uiState.totalPartCount
+                                val isLastPart = uiState.currentPart >= totalPartCount
+
+                                if (isLastPart) {
+                                    val nextLevel = uiState.currentLevel + 1
+                                    val debugCheckpointStartLevel =
+                                        calculateCheckpointStartLevelForLevel(nextLevel)
+
+                                    progressStorage.saveCheckpointStartLevel(
+                                        debugCheckpointStartLevel
+                                    )
+                                    checkpointStartLevel = debugCheckpointStartLevel
+
+                                    controller.onAction(GameAction.NextLevel)
+                                    controller.onAction(GameAction.StartGame)
+                                } else {
+                                    val simulatedTarget = uiState.targetCorrectCountForActivePart
+
+                                    repeat(simulatedTarget.coerceAtLeast(1)) {
+                                        controller.onAction(GameAction.DebugAddCorrectCatch)
+                                    }
+                                }
+                            },
+                            onAddLivesClick = {
+                                controller.onAction(GameAction.DebugAddLives)
+                            },
+                            onRestartFromCheckpointClick = {
+                                val restartLevel = checkpointStartLevel.coerceAtLeast(1)
+
+                                controller.onAction(GameAction.StartFromLevel(restartLevel))
+                                controller.onAction(GameAction.StartGame)
+                            },
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(BallropDimens.Space12)
+                        )
+                    }
                 }
             }
+        }
+
+
+    }
+    }
+
+
+
+
+@Composable
+private fun GameHeader(
+    uiState: GameUiState,
+    onPauseClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(58.dp)
+    ) {
+        Text(
+            text = "Level: ${uiState.currentLevel}",
+            style = MaterialTheme.typography.titleSmall,
+            color = BallropColors.TextPrimary,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(start = 86.dp, top = 2.dp)
+        )
+
+        Text(
+            text = "Bölüm: ${uiState.currentPart}/${uiState.totalPartCount}",
+            style = MaterialTheme.typography.titleSmall,
+            color = BallropColors.TextPrimary,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 2.dp)
+        )
+
+        PauseIconButton(
+            isPaused = uiState.status == GameStatus.PAUSED,
+            enabled = uiState.status == GameStatus.PLAYING || uiState.status == GameStatus.PAUSED,
+            onClick = onPauseClick,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(end = 2.dp, top = 0.dp)
+        )
+
+        GameLivesOverlay(
+            remainingLives = uiState.remainingLives,
+            scale = 1.25f,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 22.dp, bottom = 2.dp, top = 2.dp)
+        )
+    }
+}
+
+@Composable
+private fun PauseIconButton(
+    isPaused: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .size(54.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(
+                if (isPaused) {
+                    BallropColors.SurfaceSoft.copy(alpha = 0.96f)
+                } else {
+                    BallropColors.Surface.copy(alpha = 0.96f)
+                }
+            )
+            .clickable(enabled = enabled) {
+                onClick()
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        if (isPaused) {
+            PlayGlyph()
+        } else {
+            PauseGlyph()
         }
     }
 }
 
 @Composable
-private fun GameTopBar(
-    uiState: GameUiState,
-    onPauseClick: () -> Unit
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(BallropDimens.Space8)
+private fun PauseGlyph() {
+    Box(
+        modifier = Modifier.size(20.dp),
+        contentAlignment = Alignment.Center
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(BallropDimens.Space8),
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
         ) {
-            InfoCard(
-                title = "Level",
-                value = uiState.currentLevel.toString(),
-                modifier = Modifier.weight(1f)
+            Box(
+                modifier = Modifier
+                    .size(width = 5.dp, height = 18.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(BallropColors.TextPrimary)
             )
 
-            InfoCard(
-                title = "Part",
-                value = "${uiState.currentPart}/${uiState.totalPartCount}",
-                modifier = Modifier.weight(1f),
-                highlighted = true
-            )
+            Spacer(modifier = Modifier.width(4.dp))
 
-            InfoCard(
-                title = "Hak",
-                value = uiState.remainingLives.toString(),
-                modifier = Modifier.weight(1f),
-                highlighted = uiState.remainingLives <= 2
-            )
-
-            PauseButton(
-                isPaused = uiState.status == GameStatus.PAUSED,
-                enabled = uiState.status == GameStatus.PLAYING || uiState.status == GameStatus.PAUSED,
-                modifier = Modifier.weight(1f),
-                onClick = onPauseClick
+            Box(
+                modifier = Modifier
+                    .size(width = 5.dp, height = 18.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(BallropColors.TextPrimary)
             )
         }
+    }
+}
+@Composable
+private fun PlayGlyph() {
+    Box(
+        modifier = Modifier.size(20.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(
+            modifier = Modifier.size(width = 16.dp, height = 18.dp)
+        ) {
+            val path = Path().apply {
+                moveTo(0f, 0f)
+                lineTo(size.width, size.height / 2f)
+                lineTo(0f, size.height)
+                close()
+            }
+
+            drawPath(
+                path = path,
+                color = BallropColors.TextPrimary
+            )
+        }
+    }
+}
+@Composable
+private fun HeaderInfoText(
+    text: String,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = BallropColors.TextPrimary,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@Composable
+private fun TopBarTextItem(
+    label: String,
+    value: String
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(BallropDimens.Space4)
+    ) {
+        Text(
+            text = "$label:",
+            style = MaterialTheme.typography.labelMedium,
+            color = BallropColors.TextSecondary
+        )
 
         Text(
-            text = "Skor ${uiState.score}  •  Hedef Kalan ${uiState.remainingTargetCount}",
+            text = value,
             style = MaterialTheme.typography.labelLarge,
-            color = BallropColors.TextSecondary,
-            modifier = Modifier.padding(start = BallropDimens.Space4)
+            color = BallropColors.TextPrimary
         )
     }
 }

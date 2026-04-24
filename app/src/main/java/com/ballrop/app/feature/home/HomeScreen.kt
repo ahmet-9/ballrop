@@ -1,11 +1,16 @@
 package com.ballrop.app.feature.home
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -13,12 +18,21 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -28,22 +42,26 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.ballrop.app.core.design.BallropColors
-import com.ballrop.app.core.design.BallropDimens
-import com.ballrop.app.core.storage.GameProgressStorage
-
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.ballrop.app.R
+import com.ballrop.app.core.design.BallropColors
+import com.ballrop.app.core.storage.GameProgressStorage
 
 @Composable
 fun HomeScreen(
@@ -54,21 +72,28 @@ fun HomeScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val progressStorage = remember { GameProgressStorage(context) }
 
-    var bestScore by remember { mutableIntStateOf(0) }
     var bestLevel by remember { mutableIntStateOf(1) }
     var checkpointStartLevel by remember { mutableIntStateOf(1) }
+    var checkpointPart by remember { mutableIntStateOf(1) }
+    var checkpointLives by remember { mutableIntStateOf(5) }
     var canContinue by remember { mutableStateOf(false) }
+    var targetCorrectCount by remember { mutableIntStateOf(20) }
+    var remainingTargetCount by remember { mutableIntStateOf(20) }
     var showNewGameConfirmDialog by remember { mutableStateOf(false) }
 
     fun refreshProgressState() {
-        bestScore = progressStorage.getBestScore()
         bestLevel = progressStorage.getBestLevel()
 
-        val storedCheckpoint = progressStorage.getCheckpointStartLevel()
+        val continueLevel = progressStorage.getContinueLevel()
         val storedCanContinue = progressStorage.canContinue()
 
-        checkpointStartLevel = storedCheckpoint
-        canContinue = storedCanContinue && storedCheckpoint > 1
+        checkpointStartLevel = continueLevel
+        checkpointPart = progressStorage.getCheckpointPart()
+        checkpointLives = progressStorage.getCheckpointLives()
+        targetCorrectCount = progressStorage.getResumeTargetCorrectCount()
+        remainingTargetCount = progressStorage.getResumeRemainingTargetCount()
+
+        canContinue = storedCanContinue
     }
 
     LaunchedEffect(Unit) {
@@ -91,12 +116,8 @@ fun HomeScreen(
 
     if (showNewGameConfirmDialog) {
         AlertDialog(
-            onDismissRequest = {
-                showNewGameConfirmDialog = false
-            },
-            title = {
-                Text(text = "Yeni Oyun Başlat")
-            },
+            onDismissRequest = { showNewGameConfirmDialog = false },
+            title = { Text(text = "Yeni Oyun Başlat") },
             text = {
                 Text(
                     text = "Mevcut devam hakkın silinecek. Yeni oyun Level 1'den başlayacak."
@@ -116,9 +137,7 @@ fun HomeScreen(
             },
             dismissButton = {
                 TextButton(
-                    onClick = {
-                        showNewGameConfirmDialog = false
-                    }
+                    onClick = { showNewGameConfirmDialog = false }
                 ) {
                     Text(text = "Vazgeç")
                 }
@@ -129,71 +148,67 @@ fun HomeScreen(
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .background(BallropColors.BackgroundPrimary)
+            .background(Color(0xFF010815))
     ) {
-        val isTabletLike = maxWidth >= 700.dp
-        val horizontalPadding = if (isTabletLike) 48.dp else BallropDimens.Space20
-        val topSpacing = if (isTabletLike) 28.dp else BallropDimens.Space20
-        val heroHeight = if (isTabletLike) 320.dp else 220.dp
+        val isTablet = maxWidth >= 600.dp
+        val sidePadding = if (isTablet) 28.dp else 18.dp
+        val panelMaxWidth = if (isTablet) 560.dp else 420.dp
+        val panelHorizontalPadding = if (isTablet) 22.dp else 16.dp
+        val panelBottomPadding = if (isTablet) 20.dp else 14.dp
+        val panelShape = RoundedCornerShape(28.dp)
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(horizontal = horizontalPadding, vertical = BallropDimens.Space16),
-            verticalArrangement = Arrangement.spacedBy(BallropDimens.Space16)
+        Box(
+            modifier = Modifier.fillMaxSize()
         ) {
-            Column(
+            Image(
+                painter = painterResource(id = R.drawable.home_background_ballrop),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = topSpacing),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(BallropDimens.Space8)
-            ) {
-                Text(
-                    text = "BALLROP",
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = BallropColors.TextPrimary,
-                    fontWeight = FontWeight.ExtraBold,
-                    textAlign = TextAlign.Center
-                )
-
-                Text(
-                    text = "Renkli topları doğru sepetlere sürükle. İlerleme checkpoint ile korunur.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = BallropColors.TextSecondary,
-                    textAlign = TextAlign.Center
-                )
-            }
-
-            HeroPlayfieldCard(
-                heroHeight = heroHeight
-            )
-
-            ProgressSummaryRow(
-                bestScore = bestScore,
-                bestLevel = bestLevel,
-                checkpointStartLevel = checkpointStartLevel,
-                canContinue = canContinue
-            )
-
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(BallropDimens.Space12)
-            ) {
-                if (canContinue) {
-                    ContinueGameButton(
-                        checkpointStartLevel = checkpointStartLevel,
-                        onClick = {
-                            onContinueClick(checkpointStartLevel)
-                        }
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colorStops = arrayOf(
+                                0.00f to Color.Transparent,
+                                0.58f to Color.Transparent,
+                                0.78f to Color(0x12000000),
+                                1.00f to Color(0x26000000)
+                            )
+                        )
                     )
-                }
+            )
 
-                StartGameButton(
-                    text = if (canContinue) "Yeni Oyun" else "Oyuna Başla",
-                    onClick = {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .padding(horizontal = sidePadding, vertical = 12.dp)
+            ) {
+                HomePanel(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(top = 250.dp)
+                        .fillMaxWidth()
+                        .widthIn(max = panelMaxWidth),
+                    shape = panelShape,
+                    bestLevel = bestLevel,
+                    checkpointStartLevel = checkpointStartLevel,
+                    checkpointPart = checkpointPart,
+                    checkpointLives = checkpointLives,
+                    targetCorrectCount = targetCorrectCount,
+                    remainingTargetCount = remainingTargetCount,
+                    canContinue = canContinue,
+                    panelHorizontalPadding = panelHorizontalPadding,
+                    panelBottomPadding = panelBottomPadding,
+                    onContinueClick = {
+                        onContinueClick(checkpointStartLevel)
+                    },
+                    onStartClick = {
                         if (canContinue) {
                             showNewGameConfirmDialog = true
                         } else {
@@ -203,197 +218,300 @@ fun HomeScreen(
                         }
                     }
                 )
-
-                QuickInfoCard(
-                    canContinue = canContinue,
-                    checkpointStartLevel = checkpointStartLevel
-                )
             }
         }
     }
 }
 
 @Composable
-private fun HeroPlayfieldCard(
-    heroHeight: Dp
+private fun HomePanel(
+    modifier: Modifier,
+    shape: Shape,
+    bestLevel: Int,
+    checkpointStartLevel: Int,
+    checkpointPart: Int,
+    checkpointLives: Int,
+    targetCorrectCount: Int,
+    remainingTargetCount: Int,
+    canContinue: Boolean,
+    panelHorizontalPadding: Dp,
+    panelBottomPadding: Dp,
+    onContinueClick: () -> Unit,
+    onStartClick: () -> Unit
 ) {
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(heroHeight)
-            .clip(RoundedCornerShape(BallropDimens.Radius24))
+        modifier = modifier
+            .clip(shape)
             .background(
                 brush = Brush.verticalGradient(
                     colors = listOf(
-                        BallropColors.Surface,
-                        BallropColors.SurfaceSoft
+                        Color(0xF402163C),
+                        Color(0xF0011331),
+                        Color(0xF3000C24)
                     )
                 )
             )
-            .padding(BallropDimens.Space20)
-    ) {
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .size(58.dp)
-                .clip(RoundedCornerShape(29.dp))
-                .background(BallropColors.BallBlue.copy(alpha = 0.90f))
-        )
-
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 28.dp, end = 12.dp)
-                .size(52.dp)
-                .clip(RoundedCornerShape(26.dp))
-                .background(BallropColors.BallRed.copy(alpha = 0.90f))
-        )
-
-        Box(
-            modifier = Modifier
-                .align(Alignment.Center)
-                .padding(top = 12.dp)
-        ) {
-            Text(
-                text = "Hız + Refleks + Renk",
-                style = MaterialTheme.typography.titleLarge,
-                color = BallropColors.TextPrimary,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
-            )
-        }
-
-        Row(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(BallropDimens.Space16)
-        ) {
-            BasketPreview(
-                title = "Mavi Sepet",
-                modifier = Modifier.weight(1f),
+            .border(
+                width = 1.4.dp,
                 brush = Brush.verticalGradient(
                     colors = listOf(
-                        BallropColors.BasketBlue,
-                        BallropColors.BasketBlueDark
+                        Color(0xFF0E8CFF),
+                        Color(0x802A7FFF),
+                        Color(0x66106BFF)
                     )
-                )
+                ),
+                shape = shape
             )
-
-            BasketPreview(
-                title = "Kırmızı Sepet",
-                modifier = Modifier.weight(1f),
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        BallropColors.BasketRed,
-                        BallropColors.BasketRedDark
-                    )
-                )
-            )
-        }
-    }
-}
-
-@Composable
-private fun BasketPreview(
-    title: String,
-    modifier: Modifier = Modifier,
-    brush: Brush
-) {
-    Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(BallropDimens.Space8)
     ) {
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(78.dp)
-                .clip(RoundedCornerShape(BallropDimens.Radius20))
-                .background(brush = brush)
-        )
+                .padding(
+                    start = panelHorizontalPadding,
+                    end = panelHorizontalPadding,
+                    top = 22.dp,
+                    bottom = panelBottomPadding
+                ),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Spacer(modifier = Modifier.height(8.dp))
 
-        Text(
-            text = title,
-            style = MaterialTheme.typography.labelLarge,
-            color = BallropColors.TextSecondary,
-            textAlign = TextAlign.Center
-        )
+            ProgressSummaryRow(
+                bestLevel = bestLevel,
+                checkpointStartLevel = checkpointStartLevel,
+                checkpointPart = checkpointPart,
+                checkpointLives = checkpointLives,
+                targetCorrectCount = targetCorrectCount,
+                remainingTargetCount = remainingTargetCount,
+                canContinue = canContinue
+            )
+
+            if (canContinue) {
+                ContinueGameButton(
+                    checkpointStartLevel = checkpointStartLevel,
+                    checkpointPart = checkpointPart,
+                    onClick = onContinueClick
+                )
+            }
+
+            StartGameButton(
+                text = if (canContinue) "Yeni Oyun Başlat" else "Oyuna Başla",
+                onClick = onStartClick
+            )
+
+            QuickInfoCard(
+                canContinue = canContinue,
+                checkpointStartLevel = checkpointStartLevel,
+                checkpointPart = checkpointPart
+            )
+        }
     }
 }
 
 @Composable
 private fun ProgressSummaryRow(
-    bestScore: Int,
     bestLevel: Int,
     checkpointStartLevel: Int,
+    checkpointPart: Int,
+    checkpointLives: Int,
+    targetCorrectCount: Int,
+    remainingTargetCount: Int,
     canContinue: Boolean
 ) {
-    Row(
+    val displayLevel = if (canContinue) checkpointStartLevel else 1
+    val displayPart = if (canContinue) checkpointPart else 1
+    val displayLives = if (canContinue) checkpointLives else 5
+
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(BallropDimens.Space12)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        ProgressCard(
-            title = "En İyi Skor",
-            value = bestScore.toString(),
-            modifier = Modifier.weight(1f)
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            ProgressInfoCard(
+                title = if (canContinue) "Devam Leveli" else "Başlangıç",
+                value = "Level $displayLevel",
+                subtitle = if (canContinue) "Checkpoint aktif" else "Yeni run hazır",
+                badgeText = "LV",
+                badgeColor = Color(0xFF31A8FF),
+                progress = null,
+                modifier = Modifier.weight(1f)
+            )
 
-        ProgressCard(
-            title = "En Yüksek Level",
-            value = bestLevel.toString(),
-            modifier = Modifier.weight(1f)
-        )
-    }
+            ProgressInfoCard(
+                title = "Bölüm",
+                value = "$displayPart / 3",
+                subtitle = if (canContinue) "Part $displayPart’den devam" else "Part 1’den başlar",
+                badgeText = "$displayPart/3",
+                badgeColor = Color(0xFF26D9FF),
+                progress = displayPart / 3f,
+                modifier = Modifier.weight(1f)
+            )
+        }
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = BallropDimens.Space12),
-        horizontalArrangement = Arrangement.spacedBy(BallropDimens.Space12)
-    ) {
-        ProgressCard(
-            title = "Checkpoint",
-            value = if (canContinue) "Level $checkpointStartLevel" else "-",
-            modifier = Modifier.weight(1f)
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            ProgressInfoCard(
+                title = "Can Hakkı",
+                value = "$displayLives / 5",
+                subtitle = "Her part yenilenir",
+                badgeText = "♥",
+                badgeColor = Color(0xFFFF3D5A),
+                progress = displayLives / 5f,
+                modifier = Modifier.weight(1f)
+            )
 
-        ProgressCard(
-            title = "Durum",
-            value = if (canContinue) "Devam Hazır" else "Yeni Run",
-            modifier = Modifier.weight(1f)
-        )
+            ProgressInfoCard(
+                title = "Hedefe Kalan",
+                value = "$remainingTargetCount Top",
+                subtitle = "Hedef $targetCorrectCount",
+                badgeText = "%",
+                badgeColor = Color(0xFF9B5CFF),
+                progress = if (targetCorrectCount > 0) {
+                    1f - (remainingTargetCount.toFloat() / targetCorrectCount.toFloat())
+                } else {
+                    0f
+                },
+                modifier = Modifier.weight(1f)
+            )
+        }
     }
 }
 
 @Composable
-private fun ProgressCard(
+private fun ProgressInfoCard(
     title: String,
     value: String,
+    subtitle: String,
+    badgeText: String,
+    badgeColor: Color,
+    progress: Float?,
     modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(BallropDimens.Radius18))
-            .background(BallropColors.SurfaceSoft.copy(alpha = 0.95f))
-            .padding(
-                horizontal = BallropDimens.Space16,
-                vertical = BallropDimens.Space14
-            ),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(BallropDimens.Space6)
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(20.dp),
+        color = Color.Transparent,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.labelMedium,
-            color = BallropColors.TextMuted,
-            textAlign = TextAlign.Center
-        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFF0A2C67),
+                            Color(0xFF08214E),
+                            Color(0xFF06193B)
+                        )
+                    )
+                )
+                .border(
+                    width = 1.dp,
+                    color = Color(0x332EA6FF),
+                    shape = RoundedCornerShape(20.dp)
+                )
+                .padding(horizontal = 12.dp, vertical = 12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ProgressBadge(
+                    text = badgeText,
+                    color = badgeColor,
+                    progress = progress
+                )
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = BallropColors.TextMuted,
+                        maxLines = 1
+                    )
+
+                    Text(
+                        text = value,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = BallropColors.TextPrimary,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
+                    )
+
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = BallropColors.TextSecondary,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProgressBadge(
+    text: String,
+    color: Color,
+    progress: Float?
+) {
+    Box(
+        modifier = Modifier.size(44.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.matchParentSize()) {
+            drawCircle(
+                color = color.copy(alpha = 0.16f),
+                radius = size.minDimension / 2f
+            )
+
+            drawCircle(
+                color = color.copy(alpha = 0.45f),
+                radius = size.minDimension / 2f,
+                style = Stroke(width = 1.4.dp.toPx())
+            )
+
+            if (progress != null) {
+                drawArc(
+                    color = color,
+                    startAngle = -90f,
+                    sweepAngle = 360f * progress.coerceIn(0f, 1f),
+                    useCenter = false,
+                    topLeft = androidx.compose.ui.geometry.Offset(3.dp.toPx(), 3.dp.toPx()),
+                    size = Size(
+                        width = size.width - 6.dp.toPx(),
+                        height = size.height - 6.dp.toPx()
+                    ),
+                    style = Stroke(
+                        width = 3.dp.toPx(),
+                        cap = StrokeCap.Round
+                    )
+                )
+            }
+        }
+
+        val displayText = if (progress != null && text == "%") {
+            "${(progress * 100).toInt().coerceIn(0, 100)}%"
+        } else {
+            text
+        }
 
         Text(
-            text = value,
-            style = MaterialTheme.typography.titleLarge,
-            color = BallropColors.TextPrimary,
+            text = displayText,
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
         )
@@ -401,27 +519,139 @@ private fun ProgressCard(
 }
 
 @Composable
-private fun ContinueGameButton(
-    checkpointStartLevel: Int,
+private fun NeonActionCard(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    iconGlowColor: Color,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
-    Button(
-        onClick = onClick,
-        modifier = Modifier
+    val shape = RoundedCornerShape(22.dp)
+
+    Box(
+        modifier = modifier
             .fillMaxWidth()
-            .height(58.dp),
-        shape = RoundedCornerShape(BallropDimens.Radius20),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = BallropColors.Success,
-            contentColor = BallropColors.White
-        )
+            .clip(shape)
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF0D2A63),
+                        Color(0xFF081C46),
+                        Color(0xFF04132F)
+                    )
+                )
+            )
+            .border(
+                width = 1.2.dp,
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF2EA6FF),
+                        Color(0x802E7DFF),
+                        Color(0x40205CFF)
+                    )
+                ),
+                shape = shape
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp)
     ) {
-        Text(
-            text = "Devam Et • Level $checkpointStartLevel",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .clip(
+                    RoundedCornerShape(
+                        topStart = 22.dp,
+                        bottomStart = 22.dp,
+                        topEnd = 0.dp,
+                        bottomEnd = 0.dp
+                    )
+                )
+                .background(
+                    brush = Brush.horizontalGradient(
+                        colors = listOf(
+                            Color(0x1200D1FF),
+                            Color(0x082F8CFF),
+                            Color.Transparent
+                        )
+                    )
+                )
         )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(CircleShape)
+                    .background(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                iconGlowColor.copy(alpha = 0.55f),
+                                iconGlowColor.copy(alpha = 0.18f),
+                                Color(0xFF0A1D45)
+                            )
+                        )
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = iconGlowColor.copy(alpha = 0.65f),
+                        shape = CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(26.dp)
+                )
+            }
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 14.dp, end = 12.dp)
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = BallropColors.TextPrimary,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = BallropColors.TextSecondary
+                )
+            }
+
+            Icon(
+                imageVector = Icons.Filled.ArrowForward,
+                contentDescription = null,
+                tint = Color(0xFF8BBEFF),
+                modifier = Modifier.size(18.dp)
+            )
+        }
     }
+}
+
+@Composable
+private fun ContinueGameButton(
+    checkpointStartLevel: Int,
+    checkpointPart: Int,
+    onClick: () -> Unit
+) {
+    NeonActionCard(
+        title = "Kaldığın Yerden Devam Et",
+        subtitle = "Level $checkpointStartLevel • Bölüm $checkpointPart/3 noktasından devam et",
+        icon = Icons.Filled.Refresh,
+        iconGlowColor = Color(0xFF21E38A),
+        onClick = onClick
+    )
 }
 
 @Composable
@@ -429,54 +659,62 @@ private fun StartGameButton(
     text: String,
     onClick: () -> Unit
 ) {
-    Button(
-        onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(58.dp),
-        shape = RoundedCornerShape(BallropDimens.Radius20),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = BallropColors.BasketBlue,
-            contentColor = BallropColors.White
-        )
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-    }
+    NeonActionCard(
+        title = text,
+        subtitle = "Yeni bir oyun akışı başlat",
+        icon = Icons.Filled.PlayArrow,
+        iconGlowColor = Color(0xFF31A8FF),
+        onClick = onClick
+    )
 }
 
 @Composable
 private fun QuickInfoCard(
     canContinue: Boolean,
-    checkpointStartLevel: Int
+    checkpointStartLevel: Int,
+    checkpointPart: Int
 ) {
-    Column(
+    val shape = RoundedCornerShape(22.dp)
+
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(BallropDimens.Radius18))
-            .background(BallropColors.Surface.copy(alpha = 0.92f))
-            .padding(BallropDimens.Space16),
-        verticalArrangement = Arrangement.spacedBy(BallropDimens.Space8)
+            .clip(shape)
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xE60A1E46),
+                        Color(0xE6051636),
+                        Color(0xE6020E26)
+                    )
+                )
+            )
+            .border(
+                width = 1.dp,
+                color = Color(0x332EA6FF),
+                shape = shape
+            )
+            .padding(16.dp)
     ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = if (canContinue) "Devam Bilgisi" else "Oyun Mantığı",
+                style = MaterialTheme.typography.titleMedium,
+                color = BallropColors.TextPrimary,
+                fontWeight = FontWeight.Bold
+            )
 
-        Text(
-            text = if (canContinue) "Devam Bilgisi" else "Oyun Mantığı",
-            style = MaterialTheme.typography.titleMedium,
-            color = BallropColors.TextPrimary,
-            fontWeight = FontWeight.Bold
-        )
-
-        Text(
-            text = if (canContinue) {
-                "Devam edersen Level $checkpointStartLevel noktasından başlarsın. Yeni oyun başlatırsan mevcut devam hakkın sıfırlanır."
-            } else {
-                "Amaç doğru topu doğru sepete yönlendirmek. Asıl ilerleme level ve checkpoint üzerinden ilerler."
-            },
-            style = MaterialTheme.typography.bodyMedium,
-            color = BallropColors.TextSecondary
-        )
+            Text(
+                text = if (canContinue) {
+                    "Devam edersen Level $checkpointStartLevel • Bölüm $checkpointPart/3 akışından başlarsın. Yeni oyun açarsan mevcut devam hakkın sıfırlanır."
+                } else {
+                    "Amaç doğru topu doğru sepete sürüklemek. Level, bölüm ve checkpoint sistemi ilerlemeni korur."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = BallropColors.TextSecondary
+            )
+        }
     }
 }

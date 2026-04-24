@@ -12,9 +12,17 @@ sealed class GameFlowDirective {
     data object Waiting : GameFlowDirective()
     data object Completed : GameFlowDirective()
 }
+data class GameFlowSnapshot(
+    val currentBlockIndex: Int,
+    val currentBlockSpawnCount: Int,
+    val shapeConsumedForCurrentBlock: Boolean,
+    val shapePreGapCompleted: Boolean,
+    val shapePostGapCompleted: Boolean
+)
 
 class GameFlowEngine(
-    private val partConfig: LevelPartConfig
+    private val partConfig: LevelPartConfig,
+    snapshot: GameFlowSnapshot? = null
 ) {
     private val blocks: List<LevelFlowBlock> = if (partConfig.flowBlocks.isEmpty()) {
         listOf(
@@ -28,10 +36,15 @@ class GameFlowEngine(
         partConfig.flowBlocks
     }
 
-    private var currentBlockIndex: Int = 0
-    private var currentBlockSpawnCount: Int = 0
+    private val preShapeGapMillis = 3000L
+    private val postShapeGapMillis = 6000L
+
+    private var currentBlockIndex: Int = snapshot?.currentBlockIndex ?: 0
+    private var currentBlockSpawnCount: Int = snapshot?.currentBlockSpawnCount ?: 0
     private var gapStartMillis: Long = 0L
-    private var shapeConsumedForCurrentBlock: Boolean = false
+    private var shapeConsumedForCurrentBlock: Boolean = snapshot?.shapeConsumedForCurrentBlock ?: false
+    private var shapePreGapCompleted: Boolean = snapshot?.shapePreGapCompleted ?: false
+    private var shapePostGapCompleted: Boolean = snapshot?.shapePostGapCompleted ?: false
 
     fun update(nowMillis: Long): GameFlowDirective {
         while (currentBlockIndex < blocks.size) {
@@ -54,9 +67,44 @@ class GameFlowEngine(
                 }
 
                 LevelFlowBlockType.SHAPE_BLOCK -> {
+                    if (!shapePreGapCompleted) {
+                        if (gapStartMillis == 0L) {
+                            gapStartMillis = nowMillis
+                        }
+
+                        val elapsed = nowMillis - gapStartMillis
+                        if (elapsed < preShapeGapMillis) {
+                            return GameFlowDirective.Waiting
+                        }
+
+                        shapePreGapCompleted = true
+                        gapStartMillis = 0L
+                    }
+
                     if (!shapeConsumedForCurrentBlock) {
                         shapeConsumedForCurrentBlock = true
                         return GameFlowDirective.SpawnShape(block.shapeCode ?: 0)
+                    }
+
+                    if (!shapePostGapCompleted) {
+                        val nextBlock = blocks.getOrNull(currentBlockIndex + 1)
+
+                        if (nextBlock?.type == LevelFlowBlockType.GAP) {
+                            advanceToNextBlock()
+                            continue
+                        }
+
+                        if (gapStartMillis == 0L) {
+                            gapStartMillis = nowMillis
+                        }
+
+                        val elapsed = nowMillis - gapStartMillis
+                        if (elapsed < postShapeGapMillis) {
+                            return GameFlowDirective.Waiting
+                        }
+
+                        shapePostGapCompleted = true
+                        gapStartMillis = 0L
                     }
 
                     advanceToNextBlock()
@@ -68,8 +116,14 @@ class GameFlowEngine(
                         gapStartMillis = nowMillis
                     }
 
+                    val effectiveGap = if (isGapAfterShape()) {
+                        postShapeGapMillis
+                    } else {
+                        block.gapDurationMillis
+                    }
+
                     val elapsed = nowMillis - gapStartMillis
-                    if (elapsed >= block.gapDurationMillis) {
+                    if (elapsed >= effectiveGap) {
                         advanceToNextBlock()
                         continue
                     }
@@ -87,6 +141,15 @@ class GameFlowEngine(
         if (block.type != LevelFlowBlockType.BALL_BLOCK) return
         currentBlockSpawnCount += 1
     }
+    fun exportSnapshot(): GameFlowSnapshot {
+        return GameFlowSnapshot(
+            currentBlockIndex = currentBlockIndex,
+            currentBlockSpawnCount = currentBlockSpawnCount,
+            shapeConsumedForCurrentBlock = shapeConsumedForCurrentBlock,
+            shapePreGapCompleted = shapePreGapCompleted,
+            shapePostGapCompleted = shapePostGapCompleted
+        )
+    }
 
     private fun currentBlock(): LevelFlowBlock? {
         return blocks.getOrNull(currentBlockIndex)
@@ -97,17 +160,15 @@ class GameFlowEngine(
         currentBlockSpawnCount = 0
         gapStartMillis = 0L
         shapeConsumedForCurrentBlock = false
+        shapePreGapCompleted = false
+        shapePostGapCompleted = false
     }
 
     private fun shouldAdvanceCurrentBallBlock(): Boolean {
         val block = currentBlock() ?: return false
         if (block.type != LevelFlowBlockType.BALL_BLOCK) return false
 
-        // "kalan kısım" olan blok part bitene kadar sürer.
-        // Part bitişini GameController yönetir.
         if (block.useRemainingProgress) return false
-
-        // Son meaningful ball block ise ve sonrası yoksa, part bitene kadar sürsün.
         if (!hasMeaningfulBlockAfterCurrent()) return false
 
         val quota = approximateSpawnQuota(block)
@@ -120,13 +181,16 @@ class GameFlowEngine(
             .any { it.type == LevelFlowBlockType.BALL_BLOCK || it.type == LevelFlowBlockType.SHAPE_BLOCK }
     }
 
+    private fun isGapAfterShape(): Boolean {
+        if (currentBlock()?.type != LevelFlowBlockType.GAP) return false
+        val previousBlock = blocks.getOrNull(currentBlockIndex - 1)
+        return previousBlock?.type == LevelFlowBlockType.SHAPE_BLOCK
+    }
+
     private fun approximateSpawnQuota(block: LevelFlowBlock): Int {
         val target = partConfig.targetCorrectCount.coerceAtLeast(1)
         val percent = (block.progressPercent ?: 100).coerceIn(1, 100)
 
-        // Dökümandaki akış sırasına daha sadık olmak için
-        // yüzdeyi doğrudan hedef top sayısına bağlıyoruz.
-        // Bu quota "doğru top" değil "spawn sayısı" bazlıdır.
         return ceil(target * (percent / 100f))
             .toInt()
             .coerceAtLeast(6)

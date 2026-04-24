@@ -31,9 +31,24 @@ sealed interface GameAction {
     ) : GameAction
 
     data object TryAgain : GameAction
-    data class StartFromLevel(val level: Int) : GameAction
 
-    //DEBUG
+    data class StartFromLevel(
+        val level: Int
+    ) : GameAction
+
+    data class StartFromProgress(
+        val level: Int,
+        val part: Int,
+        val correctPlacedCount: Int,
+        val missedCount: Int,
+        val wrongCount: Int,
+        val flowBlockIndex: Int,
+        val flowBlockSpawnCount: Int,
+        val flowShapeConsumed: Boolean,
+        val flowShapePreGapCompleted: Boolean,
+        val flowShapePostGapCompleted: Boolean
+    ) : GameAction
+
     data object DebugAddLives : GameAction
     data object DebugAddCorrectCatch : GameAction
 }

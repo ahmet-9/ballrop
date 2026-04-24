@@ -27,6 +27,7 @@ import kotlin.math.absoluteValue
 import kotlin.math.hypot
 import kotlin.math.sin
 import kotlin.random.Random
+import com.ballrop.app.feature.game.flow.GameFlowSnapshot
 
 class GameController {
 
@@ -53,6 +54,7 @@ class GameController {
 
     private var slowMotionUntilMillis = 0L
     private var flowEngine: GameFlowEngine? = null
+    private var shapePostClearCooldownUntilMillis = 0L
 
     private var basketLeftLane: Basket? = null
     private var basketRightLane: Basket? = null
@@ -60,6 +62,10 @@ class GameController {
     private var basketSwayDirection = 1f
     private var basketSwapState = false
     private var lastSwapThreshold = 0
+
+    fun currentFlowSnapshot(): GameFlowSnapshot {
+        return ensureFlowEngine().exportSnapshot()
+    }
 
     fun onAction(action: GameAction) {
         when (action) {
@@ -74,7 +80,9 @@ class GameController {
 
                 levelStartTimeMillis = now
                 lastSpawnTimeMillis = now
-                flowEngine = GameFlowEngine(partConfig)
+                if (flowEngine == null) {
+                    flowEngine = GameFlowEngine(partConfig)
+                }
 
                 uiState = uiState.copy(
                     status = GameStatus.PLAYING,
@@ -197,6 +205,23 @@ class GameController {
                     handlePartCompleted()
                 }
             }
+
+            is GameAction.StartFromProgress -> {
+                resetSessionForProgress(
+                    level = action.level,
+                    part = action.part,
+                    correctPlacedCount = action.correctPlacedCount,
+                    missedCount = action.missedCount,
+                    wrongCount = action.wrongCount,
+                    flowSnapshot = GameFlowSnapshot(
+                        currentBlockIndex = action.flowBlockIndex,
+                        currentBlockSpawnCount = action.flowBlockSpawnCount,
+                        shapeConsumedForCurrentBlock = action.flowShapeConsumed,
+                        shapePreGapCompleted = action.flowShapePreGapCompleted,
+                        shapePostGapCompleted = action.flowShapePostGapCompleted
+                    )
+                )
+            }
         }
     }
 
@@ -314,6 +339,11 @@ class GameController {
 
     private fun spawnBallIfNeeded() {
         val now = System.currentTimeMillis()
+
+        if (now < shapePostClearCooldownUntilMillis) {
+            return
+        }
+
         val engine = ensureFlowEngine()
 
         when (val directive = engine.update(now)) {
@@ -422,9 +452,11 @@ class GameController {
 
         val shapeBalls = nodes.map { node ->
             createShapeBall(
+                shapeCode = shapeCode,
                 node = node,
                 minGridX = minGridX,
                 minGridY = minGridY,
+                maxGridY = maxGridY,
                 startX = startX,
                 startY = startY,
                 radius = radius,
@@ -444,9 +476,11 @@ class GameController {
     }
 
     private fun createShapeBall(
+        shapeCode: Int,
         node: ShapeNode,
         minGridX: Int,
         minGridY: Int,
+        maxGridY: Int,
         startX: Float,
         startY: Float,
         radius: Float,
@@ -458,34 +492,60 @@ class GameController {
         val x = startX + (normalizedGridX * spacing) + radius
         val y = startY + (normalizedGridY * spacing) + radius
 
-        val shapeSpec = chooseShapeSpawnSpec()
+        val isSnakeShape = shapeCode == 18
+        val isSnakeHead = isSnakeShape && node.gridY == maxGridY
+
         val targetColor = randomBallColor()
-        val initialColor = if (shapeSpec.kind == BallKind.COLOR_SHIFT) {
-            randomDifferentColor(targetColor)
+        val initialColor = targetColor
+
+        val movementType = if (isSnakeShape) {
+            BallMovementType.ZIGZAG_SOFT
         } else {
-            targetColor
+            BallMovementType.STRAIGHT
         }
+
+        val movementPhase = if (isSnakeShape) {
+            normalizedGridY * 0.75f
+        } else {
+            0f
+        }
+
+        val shapeKind = if (isSnakeHead) {
+            BallKind.BOMB
+        } else {
+            BallKind.NORMAL
+        }
+
+        val shapeSpawnCode = if (isSnakeHead) {
+            3
+        } else if (isSnakeShape) {
+            5
+        } else {
+            1
+        }
+
+        val rotationSpeed = if (isSnakeHead) 1.2f else 0.8f
 
         return BallItem(
             id = nextBallId++,
             color = initialColor,
             targetColor = targetColor,
-            kind = shapeSpec.kind,
-            spawnCode = shapeSpec.spawnCode,
+            kind = shapeKind,
+            spawnCode = shapeSpawnCode,
             x = x.coerceIn(radius, uiState.canvasWidth - radius),
             y = y,
             radius = radius,
-            speed = (activePartBaseFallSpeed() * shapeSpec.speedMultiplier) / 60f,
+            speed = activePartBaseFallSpeed() / 60f,
             driftX = 0f,
             velocityX = 0f,
             velocityY = 0f,
             rotationDeg = Random.nextFloat() * 360f,
-            rotationSpeedDeg = if (shapeSpec.kind == BallKind.BOMB) 1.2f else 0.8f,
+            rotationSpeedDeg = rotationSpeed,
             scale = 1f,
-            movementType = BallMovementType.STRAIGHT,
-            movementPhase = 0f,
-            lockedToPattern = true,
-            colorRevealLocked = shapeSpec.kind != BallKind.COLOR_SHIFT
+            movementType = movementType,
+            movementPhase = movementPhase,
+            lockedToPattern = !isSnakeShape,
+            colorRevealLocked = true
         )
     }
 
@@ -643,10 +703,16 @@ class GameController {
 
             movedBall = updateColorShiftBall(movedBall)
 
+            val basketsTop = uiState.baskets.minOfOrNull { basket -> basket.top }
+                ?: (uiState.canvasHeight * 0.82f)
+
+            val splitRevealDistance = (uiState.canvasHeight * 0.38f).coerceAtLeast(260f)
+            val distanceToBasketLine = basketsTop - movedBall.y
+
             if (
                 movedBall.kind == BallKind.SPLIT &&
                 !movedBall.splitTriggered &&
-                movedBall.y >= uiState.canvasHeight * 0.55f
+                distanceToBasketLine <= splitRevealDistance
             ) {
                 spawnedFromSplit += createSplitChildren(movedBall)
                 return@forEach
@@ -674,71 +740,27 @@ class GameController {
 
         val distanceToBasketLine = basketsTop - ball.y
 
-        val revealStartDistance = (uiState.canvasHeight * 0.42f).coerceAtLeast(260f)
-        val revealLockDistance = (uiState.canvasHeight * 0.20f).coerceAtLeast(120f)
+        val revealLockDistance = (uiState.canvasHeight * 0.38f).coerceAtLeast(260f)
 
-        return when {
-            distanceToBasketLine <= revealLockDistance -> {
-                ball.copy(
-                    color = ball.targetColor,
-                    colorRevealLocked = true
-                )
-            }
-
-            distanceToBasketLine <= revealStartDistance -> {
-                val progress = (
-                        (revealStartDistance - distanceToBasketLine) /
-                                (revealStartDistance - revealLockDistance)
-                        ).coerceIn(0f, 1f)
-
-                val shouldRevealNow = progress >= 0.72f
-
-                if (shouldRevealNow) {
-                    ball.copy(
-                        color = ball.targetColor,
-                        colorRevealLocked = true
-                    )
-                } else {
-                    val activeColors = activePlayableColors()
-                    val rotatingColors = activeColors.filter { color ->
-                        color != ball.targetColor
-                    }
-
-                    val displayColor = if (rotatingColors.isEmpty()) {
-                        ball.targetColor
-                    } else {
-                        val rawIndex = ((ball.y / 18f) + (ball.id * 0.7f)).toInt()
-                        val safeIndex = ((rawIndex % rotatingColors.size) + rotatingColors.size) % rotatingColors.size
-                        rotatingColors[safeIndex]
-                    }
-
-                    ball.copy(
-                        color = displayColor,
-                        colorRevealLocked = false
-                    )
-                }
-            }
-
-            else -> {
-                val activeColors = activePlayableColors()
-                val rotatingColors = activeColors.filter { color ->
-                    color != ball.targetColor
-                }
-
-                val displayColor = if (rotatingColors.isEmpty()) {
-                    ball.targetColor
-                } else {
-                    val rawIndex = ((ball.y / 14f) + (ball.id * 1.1f)).toInt()
-                    val safeIndex = ((rawIndex % rotatingColors.size) + rotatingColors.size) % rotatingColors.size
-                    rotatingColors[safeIndex]
-                }
-
-                ball.copy(
-                    color = displayColor,
-                    colorRevealLocked = false
-                )
-            }
+        if (distanceToBasketLine <= revealLockDistance) {
+            return ball.copy(
+                color = ball.targetColor,
+                colorRevealLocked = true
+            )
         }
+
+        val activeColors = activePlayableColors()
+        val rotatingColors = activeColors.ifEmpty { listOf(ball.targetColor) }
+
+        val step = (System.currentTimeMillis() / 150L).toInt()
+        val rawIndex = step + ball.id.toInt()
+        val safeIndex = ((rawIndex % rotatingColors.size) + rotatingColors.size) % rotatingColors.size
+        val displayColor = rotatingColors[safeIndex]
+
+        return ball.copy(
+            color = displayColor,
+            colorRevealLocked = false
+        )
     }
 
     private fun activePlayableColors(): List<BallColor> {
@@ -749,8 +771,9 @@ class GameController {
     }
 
     private fun createSplitChildren(parent: BallItem): List<BallItem> {
-        val childRadius = (parent.radius * 0.92f).coerceAtLeast(22f)
-        val spreadX = childRadius * 1.2f
+        val childRadius = parent.radius
+        val spreadX = childRadius * 1.35f
+        val diagonalDrift = activePartBaseDriftStrength()
 
         return listOf(
             parent.copy(
@@ -762,8 +785,12 @@ class GameController {
                 x = (parent.x - spreadX).coerceIn(childRadius, uiState.canvasWidth - childRadius),
                 y = parent.y,
                 radius = childRadius,
-                velocityX = -3.5f,
-                velocityY = -1.5f,
+                speed = parent.speed,
+                driftX = -diagonalDrift,
+                velocityX = -2.0f,
+                velocityY = 0f,
+                movementType = BallMovementType.DIAGONAL_LEFT,
+                movementPhase = 0f,
                 splitTriggered = true,
                 colorRevealLocked = true
             ),
@@ -776,8 +803,12 @@ class GameController {
                 x = (parent.x + spreadX).coerceIn(childRadius, uiState.canvasWidth - childRadius),
                 y = parent.y,
                 radius = childRadius,
-                velocityX = 3.5f,
-                velocityY = -1.5f,
+                speed = parent.speed,
+                driftX = diagonalDrift,
+                velocityX = 2.0f,
+                velocityY = 0f,
+                movementType = BallMovementType.DIAGONAL_RIGHT,
+                movementPhase = 0f,
                 splitTriggered = true,
                 colorRevealLocked = true
             )
@@ -974,6 +1005,7 @@ class GameController {
 
             shapeRemaining = 0
             shapeIds = emptySet()
+            shapePostClearCooldownUntilMillis = System.currentTimeMillis() + 4000L
         }
 
         val target = uiState.targetCorrectCountForActivePart
@@ -1033,6 +1065,7 @@ class GameController {
         dragTouchOffsetX = 0f
         dragTouchOffsetY = 0f
         slowMotionUntilMillis = 0L
+        shapePostClearCooldownUntilMillis = 0L
         flowEngine = GameFlowEngine(nextPartConfig)
         resetBasketMotionState()
 
@@ -1088,6 +1121,13 @@ class GameController {
                 shapeRemaining -= 1
                 shapeIds = shapeIds - ball.id
             }
+        }
+
+        val shapeCompletedByMiss = uiState.isShapeActive && shapeRemaining <= 0
+        if (shapeCompletedByMiss) {
+            shapeRemaining = 0
+            shapeIds = emptySet()
+            shapePostClearCooldownUntilMillis = System.currentTimeMillis() + 4000L
         }
 
         val lifePenaltyMissed = missedBalls.filter {
@@ -1241,6 +1281,7 @@ class GameController {
             dragTouchOffsetX = 0f
             dragTouchOffsetY = 0f
             slowMotionUntilMillis = 0L
+            shapePostClearCooldownUntilMillis = 0L
 
             uiState = uiState.copy(
                 balls = emptyList(),
@@ -1283,6 +1324,8 @@ class GameController {
             scale = if (isCombo) 0.96f else 0.88f
         )
     }
+
+
 
     private fun createFeedbackEvent(type: GameFeedbackType): GameFeedbackEvent {
         return GameFeedbackEvent(
@@ -1887,6 +1930,7 @@ class GameController {
         sessionStartTimeMillis = 0L
         levelStartTimeMillis = 0L
         slowMotionUntilMillis = 0L
+        shapePostClearCooldownUntilMillis = 0L
         flowEngine = null
         resetBasketMotionState()
 
@@ -1895,6 +1939,68 @@ class GameController {
             currentPart = 1,
             levelConfig = newLevelConfig,
             maxMistakesAllowed = firstPartConfig.maxMistakesAllowed,
+            canvasWidth = preservedWidth,
+            canvasHeight = preservedHeight,
+            baskets = preservedBaskets
+        )
+    }
+    private fun resetSessionForProgress(
+        level: Int,
+        part: Int,
+        correctPlacedCount: Int,
+        missedCount: Int,
+        wrongCount: Int,
+        flowSnapshot: GameFlowSnapshot
+    ) {
+        val preservedWidth = uiState.canvasWidth
+        val preservedHeight = uiState.canvasHeight
+
+        val safeLevel = level.coerceAtLeast(1)
+        val newLevelConfig = currentLevelConfig(safeLevel)
+        val safePart = part.coerceIn(1, newLevelConfig.parts.size.coerceAtLeast(1))
+        val partConfig = newLevelConfig.partOrFirst(safePart)
+
+        val preservedBaskets = if (preservedWidth > 0f && preservedHeight > 0f) {
+            createBaskets(
+                width = preservedWidth,
+                height = preservedHeight,
+                colorCount = partConfig.colorCount
+            )
+        } else {
+            emptyList()
+        }
+
+        basketLeftLane = preservedBaskets.getOrNull(0)
+        basketRightLane = preservedBaskets.getOrNull(1)
+
+        nextBallId = 0L
+        nextPopupId = 0L
+        nextFeedbackEventId = 0L
+        lastSpawnTimeMillis = 0L
+        draggingBallId = null
+        lastCorrectCatchMillis = 0L
+        lastPointerX = 0f
+        lastPointerY = 0f
+        lastDragDeltaX = 0f
+        lastDragDeltaY = 0f
+        dragTouchOffsetX = 0f
+        dragTouchOffsetY = 0f
+        sessionStartTimeMillis = 0L
+        levelStartTimeMillis = 0L
+        slowMotionUntilMillis = 0L
+        shapePostClearCooldownUntilMillis = 0L
+        flowEngine = GameFlowEngine(partConfig, flowSnapshot)
+        resetBasketMotionState()
+
+        uiState = GameUiState(
+            currentLevel = safeLevel,
+            currentPart = safePart,
+            correctPlacedCount = correctPlacedCount
+                .coerceIn(0, partConfig.targetCorrectCount),
+            missedCount = missedCount.coerceAtLeast(0),
+            wrongCount = wrongCount.coerceAtLeast(0),
+            levelConfig = newLevelConfig,
+            maxMistakesAllowed = partConfig.maxMistakesAllowed,
             canvasWidth = preservedWidth,
             canvasHeight = preservedHeight,
             baskets = preservedBaskets
@@ -1960,4 +2066,7 @@ class GameController {
         flowEngine = created
         return created
     }
+
+
+
 }

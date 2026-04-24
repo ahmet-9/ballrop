@@ -7,5 +7,6 @@ enum class BallMovementType {
     ZIGZAG_SOFT,
     ZIGZAG_HARD,
     DIAGONAL_LEFT,
-    DIAGONAL_RIGHT
+    DIAGONAL_RIGHT,
+
 }

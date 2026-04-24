@@ -37,104 +37,14 @@ fun GameCanvas(
         val canvasWidth = size.width
         val canvasHeight = size.height
 
-        drawRect(
-            brush = Brush.verticalGradient(
-                colors = listOf(
-                    BallropColors.BackgroundSecondary.copy(alpha = 1f),
-                    BallropColors.BackgroundPrimary.copy(alpha = 1f)
-                )
-            ),
-            size = Size(canvasWidth, canvasHeight)
-        )
 
-        drawRect(
-            brush = Brush.verticalGradient(
-                colors = listOf(
-                    BallropColors.BasketBlue.copy(alpha = 0.08f),
-                    BallropColors.Transparent
-                )
-            ),
-            size = Size(canvasWidth, canvasHeight * 0.22f)
-        )
-
-        drawRect(
-            brush = Brush.verticalGradient(
-                colors = listOf(
-                    BallropColors.White.copy(alpha = 0.035f),
-                    BallropColors.White.copy(alpha = 0.01f),
-                    BallropColors.Transparent
-                )
-            ),
-            size = Size(canvasWidth, canvasHeight * 0.16f)
-        )
-
-        drawRoundRect(
-            brush = Brush.verticalGradient(
-                colors = listOf(
-                    BallropColors.White.copy(alpha = 0.03f),
-                    BallropColors.Transparent
-                )
-            ),
-            topLeft = Offset(0f, 0f),
-            size = Size(canvasWidth, canvasHeight * 0.26f),
-            cornerRadius = CornerRadius(0f, 0f)
-        )
-
-        drawRect(
-            brush = Brush.verticalGradient(
-                colors = listOf(
-                    BallropColors.Transparent,
-                    BallropColors.BackgroundSecondary.copy(alpha = 0.14f),
-                    BallropColors.BackgroundSecondary.copy(alpha = 0.28f)
-                )
-            ),
-            topLeft = Offset(0f, canvasHeight * 0.50f),
-            size = Size(canvasWidth, canvasHeight * 0.50f)
-        )
 
         val basketsTop = uiState.baskets.firstOrNull()?.top ?: (canvasHeight * 0.74f)
         val laneTop = canvasHeight * 0.12f
         val laneBottom = basketsTop - 30f
+        val laneHeight = (laneBottom - laneTop).coerceAtLeast(0f)
 
-        drawRoundRect(
-            color = BallropColors.White.copy(alpha = 0.02f),
-            topLeft = Offset(canvasWidth * 0.06f, laneTop),
-            size = Size(canvasWidth * 0.88f, (laneBottom - laneTop).coerceAtLeast(0f)),
-            cornerRadius = CornerRadius(36f, 36f)
-        )
 
-        drawRoundRect(
-            color = BallropColors.White.copy(alpha = 0.035f),
-            topLeft = Offset(canvasWidth * 0.06f, laneTop),
-            size = Size(canvasWidth * 0.88f, 2f),
-            cornerRadius = CornerRadius(50f, 50f)
-        )
-
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    BallropColors.BasketBlue.copy(alpha = 0.08f),
-                    BallropColors.Transparent
-                ),
-                center = Offset(canvasWidth * 0.18f, canvasHeight * 0.22f),
-                radius = canvasWidth * 0.28f
-            ),
-            radius = canvasWidth * 0.28f,
-            center = Offset(canvasWidth * 0.18f, canvasHeight * 0.22f)
-        )
-
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    BallropColors.BasketRed.copy(alpha = 0.07f),
-                    BallropColors.Transparent
-                ),
-                center = Offset(canvasWidth * 0.82f, canvasHeight * 0.30f),
-                radius = canvasWidth * 0.26f
-            ),
-            radius = canvasWidth * 0.26f,
-            center = Offset(canvasWidth * 0.82f, canvasHeight * 0.30f)
-        )
 
         // Büyük silik kalan hedef sayısı
         val remainingTarget = uiState.remainingTargetCount.coerceAtLeast(0).toString()

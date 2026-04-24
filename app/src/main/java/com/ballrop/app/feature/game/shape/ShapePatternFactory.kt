@@ -150,15 +150,13 @@ object ShapePatternFactory {
 
     private fun snakeShape(): List<ShapeNode> {
         return listOf(
-            ShapeNode(0, 0), ShapeNode(1, 0), ShapeNode(2, 0), ShapeNode(3, 0), ShapeNode(4, 0),
-            ShapeNode(4, 1),
-            ShapeNode(3, 1), ShapeNode(2, 1), ShapeNode(1, 1), ShapeNode(0, 1),
+            ShapeNode(0, 0),
+            ShapeNode(0, 1),
             ShapeNode(0, 2),
-            ShapeNode(1, 2), ShapeNode(2, 2), ShapeNode(3, 2), ShapeNode(4, 2),
-            ShapeNode(4, 3),
-            ShapeNode(3, 3), ShapeNode(2, 3), ShapeNode(1, 3), ShapeNode(0, 3),
+            ShapeNode(0, 3),
             ShapeNode(0, 4),
-            ShapeNode(1, 4), ShapeNode(2, 4), ShapeNode(3, 4), ShapeNode(4, 4)
+            ShapeNode(0, 5),
+            ShapeNode(0, 6)
         )
     }
 

@@ -37,6 +37,7 @@ val BallropTypography = Typography(
         fontWeight = FontWeight.Normal
     ),
     labelLarge = TextStyle(
+
         fontSize = 16.sp,
         lineHeight = 20.sp,
         fontWeight = FontWeight.Bold

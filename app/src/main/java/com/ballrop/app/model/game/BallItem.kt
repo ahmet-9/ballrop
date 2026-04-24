@@ -22,6 +22,7 @@ data class BallItem(
     val rimBounceCooldownFrames: Int = 0,
     val rimRejected: Boolean = false,
 
+
     // Yeni alanlar
     val spawnCode: Int = 1,
     val targetColor: BallColor = color,
