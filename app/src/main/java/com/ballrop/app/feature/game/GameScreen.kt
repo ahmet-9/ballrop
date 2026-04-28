@@ -73,6 +73,18 @@ import com.ballrop.app.feature.game.components.GameLivesOverlay
 
 import androidx.compose.ui.graphics.Path
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.Icon
+import androidx.compose.ui.unit.sp
+
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
 private const val DEBUG_PANEL_ENABLED = true
 
 @Composable
@@ -135,7 +147,13 @@ fun GameScreen(
     LaunchedEffect(startLevel) {
         checkpointStartLevel = progressStorage.getContinueLevel()
 
-        if (startLevel > 1 && progressStorage.hasResumeProgress()) {
+        val sceneSnapshot = progressStorage.getResumeSceneSnapshot()
+
+        if (sceneSnapshot != null) {
+            controller.onAction(
+                GameAction.StartFromSceneSnapshot(sceneSnapshot)
+            )
+        } else if (progressStorage.hasResumeProgress()) {
             controller.onAction(
                 GameAction.StartFromProgress(
                     level = progressStorage.getResumeLevel(),
@@ -185,7 +203,7 @@ fun GameScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
-                .padding(horizontal = BallropDimens.Space16)
+               // .padding(horizontal = BallropDimens.Space16)
                 .padding(top = BallropDimens.Space12, bottom = BallropDimens.Space12)
         ) {
             GameHeader(
@@ -280,6 +298,7 @@ fun GameScreen(
                                     controller.onAction(GameAction.StartGame)
                                 },
                                 onExitToMenuClick = {
+                                    val sceneSnapshot = controller.currentSceneSnapshot()
                                     val flowSnapshot = controller.currentFlowSnapshot()
                                     progressStorage.saveResumeProgress(
                                         level = uiState.currentLevel,
@@ -295,6 +314,7 @@ fun GameScreen(
                                         flowShapePreGapCompleted = flowSnapshot.shapePreGapCompleted,
                                         flowShapePostGapCompleted = flowSnapshot.shapePostGapCompleted
                                     )
+                                    progressStorage.saveResumeSceneSnapshot(sceneSnapshot)
                                     checkpointStartLevel = uiState.currentLevel
                                     onExitToMenu()
                                 }
@@ -352,58 +372,71 @@ fun GameScreen(
                         else -> Unit
                     }
 
-                    if (DEBUG_PANEL_ENABLED) {
-                        GameDebugPanel(
-                            currentLevel = uiState.currentLevel,
-                            remainingLives = uiState.remainingLives,
-                            checkpointStartLevel = checkpointStartLevel,
-                            panelOffsetX = debugPanelOffsetX,
-                            panelOffsetY = debugPanelOffsetY,
-                            onPanelDrag = { dragX, dragY ->
-                                debugPanelOffsetX += dragX
-                                debugPanelOffsetY += dragY
-                            },
-                            onNextLevelClick = {
-                                val totalPartCount = uiState.totalPartCount
-                                val isLastPart = uiState.currentPart >= totalPartCount
-
-                                if (isLastPart) {
-                                    val nextLevel = uiState.currentLevel + 1
-                                    val debugCheckpointStartLevel =
-                                        calculateCheckpointStartLevelForLevel(nextLevel)
-
-                                    progressStorage.saveCheckpointStartLevel(
-                                        debugCheckpointStartLevel
-                                    )
-                                    checkpointStartLevel = debugCheckpointStartLevel
-
-                                    controller.onAction(GameAction.NextLevel)
-                                    controller.onAction(GameAction.StartGame)
-                                } else {
-                                    val simulatedTarget = uiState.targetCorrectCountForActivePart
-
-                                    repeat(simulatedTarget.coerceAtLeast(1)) {
-                                        controller.onAction(GameAction.DebugAddCorrectCatch)
-                                    }
-                                }
-                            },
-                            onAddLivesClick = {
-                                controller.onAction(GameAction.DebugAddLives)
-                            },
-                            onRestartFromCheckpointClick = {
-                                val restartLevel = checkpointStartLevel.coerceAtLeast(1)
-
-                                controller.onAction(GameAction.StartFromLevel(restartLevel))
-                                controller.onAction(GameAction.StartGame)
-                            },
-                            modifier = Modifier
-                                .align(Alignment.TopStart)
-                                .padding(BallropDimens.Space12)
+                    if (uiState.status == GameStatus.COUNTDOWN) {
+                        CountdownOverlay(
+                            onFinished = {
+                                controller.onAction(GameAction.FinishCountdown)
+                            }
                         )
+                    }
+                    val showDebugPanel = true
+                    if (showDebugPanel) {
+                        if (DEBUG_PANEL_ENABLED) {
+                            GameDebugPanel(
+                                currentLevel = uiState.currentLevel,
+                                remainingLives = uiState.remainingLives,
+                                checkpointStartLevel = checkpointStartLevel,
+                                panelOffsetX = debugPanelOffsetX,
+                                panelOffsetY = debugPanelOffsetY,
+                                onPanelDrag = { dragX, dragY ->
+                                    debugPanelOffsetX += dragX
+                                    debugPanelOffsetY += dragY
+                                },
+                                onNextLevelClick = {
+                                    val totalPartCount = uiState.totalPartCount
+                                    val isLastPart = uiState.currentPart >= totalPartCount
+
+                                    if (isLastPart) {
+                                        val nextLevel = uiState.currentLevel + 1
+                                        val debugCheckpointStartLevel =
+                                            calculateCheckpointStartLevelForLevel(nextLevel)
+
+                                        progressStorage.saveCheckpointStartLevel(
+                                            debugCheckpointStartLevel
+                                        )
+                                        checkpointStartLevel = debugCheckpointStartLevel
+
+                                        controller.onAction(GameAction.NextLevel)
+                                        controller.onAction(GameAction.StartGame)
+                                    } else {
+                                        val simulatedTarget =
+                                            uiState.targetCorrectCountForActivePart
+
+                                        repeat(simulatedTarget.coerceAtLeast(1)) {
+                                            controller.onAction(GameAction.DebugAddCorrectCatch)
+                                        }
+                                    }
+                                },
+                                onAddLivesClick = {
+                                    controller.onAction(GameAction.DebugAddLives)
+                                },
+                                onRestartFromCheckpointClick = {
+                                    val restartLevel = checkpointStartLevel.coerceAtLeast(1)
+
+                                    controller.onAction(GameAction.StartFromLevel(restartLevel))
+                                    controller.onAction(GameAction.StartGame)
+                                },
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .padding(BallropDimens.Space12)
+                            )
+                        }
                     }
                 }
             }
         }
+
+
 
 
     }
@@ -457,7 +490,7 @@ private fun GameHeader(
             scale = 1.25f,
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = 22.dp, bottom = 2.dp, top = 2.dp)
+                .padding(start = 35.dp, bottom = 2.dp, top = 2.dp)
         )
     }
 }
@@ -832,55 +865,254 @@ private fun PauseOverlay(
 ) {
     val hasCheckpoint = checkpointStartLevel > 1
 
-    CenterOverlayCard(
-        title = "Duraklatıldı",
-        subtitle = if (hasCheckpoint) {
-            "İstersen checkpoint'ten devam edecek şekilde run'ı yeniden başlatabilirsin."
-        } else {
-            "Hazırsan kaldığın yerden devam et."
-        }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BallropColors.White.copy(alpha = 0.14f)),
+        contentAlignment = Alignment.Center
     ) {
-        SummaryCard(
-            title = "Devam Noktası",
-            value = if (hasCheckpoint) {
-                "Level $checkpointStartLevel"
-            } else {
-                "Level 1"
-            },
-            modifier = Modifier.fillMaxWidth(),
-            highlighted = hasCheckpoint
+        Column(
+            modifier = Modifier
+                .padding(horizontal = BallropDimens.Space20)
+                .clip(RoundedCornerShape(28.dp))
+                .background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xF70A2C67),
+                            Color(0xF7061B46),
+                            Color(0xF702102D)
+                        )
+                    )
+                )
+                .border(
+                    width = 1.2.dp,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFF2EA6FF),
+                            Color(0xAA1B7CFF),
+                            Color(0x66305CFF)
+                        )
+                    ),
+                    shape = RoundedCornerShape(28.dp)
+                )
+                .padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(68.dp)
+                    .clip(CircleShape)
+                    .background(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                Color(0x5531A8FF),
+                                Color(0x2200D1FF),
+                                Color(0xFF071A3D)
+                            )
+                        )
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = Color(0xAA2EA6FF),
+                        shape = CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.PlayArrow,
+                    contentDescription = null,
+                    tint = BallropColors.White,
+                    modifier = Modifier.size(34.dp)
+                )
+            }
+
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(7.dp)
+            ) {
+                Text(
+                    text = "Oyun Duraklatıldı",
+                    color = BallropColors.TextPrimary,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Black,
+                    textAlign = TextAlign.Center
+                )
+
+                Text(
+                    text = "Hazırsan 3 saniyelik geri sayımdan sonra kaldığın yerden devam edersin.",
+                    color = BallropColors.TextSecondary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                    lineHeight = MaterialTheme.typography.bodyMedium.lineHeight
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                PauseInfoChip(
+                    title = "Devam",
+                    value = if (hasCheckpoint) {
+                        "Level $checkpointStartLevel"
+                    } else {
+                        "Level 1"
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+
+                PauseInfoChip(
+                    title = "Başlatma",
+                    value = "3 • 2 • 1",
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            PausePrimaryButton(
+                text = "Devam Et",
+                icon = Icons.Filled.PlayArrow,
+                onClick = onResumeClick
+            )
+
+            PauseSecondaryButton(
+                text = "Ana Menü",
+                onClick = onExitToMenuClick,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun PauseInfoChip(
+    title: String,
+    value: String,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF0D2A63),
+                        Color(0xFF071C46),
+                        Color(0xFF04132F)
+                    )
+                )
+            )
+            .border(
+                width = 1.dp,
+                color = Color(0x442EA6FF),
+                shape = RoundedCornerShape(18.dp)
+            )
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(3.dp)
+    ) {
+        Text(
+            text = title,
+            color = BallropColors.TextMuted,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
         )
 
-        SummaryCard(
-            title = "Seçim",
-            value = if (hasCheckpoint) {
-                "Yeniden başlatırsan Level $checkpointStartLevel noktasından açılır."
-            } else {
-                "Yeniden başlatırsan oyun baştan başlar."
-            },
-            modifier = Modifier.fillMaxWidth()
+        Text(
+            text = value,
+            color = BallropColors.TextPrimary,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.ExtraBold,
+            textAlign = TextAlign.Center
         )
+    }
+}
 
-        OverlayButton(
-            text = "Devam Et",
-            primary = true,
-            onClick = onResumeClick
-        )
+@Composable
+private fun PausePrimaryButton(
+    text: String,
+    icon: ImageVector,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF2EA6FF),
+                        Color(0xFF0E72D8),
+                        Color(0xFF07458F)
+                    )
+                )
+            )
+            .border(
+                width = 1.dp,
+                color = Color(0xCCB9E6FF),
+                shape = RoundedCornerShape(20.dp)
+            )
+            .clickable(onClick = onClick)
+            .padding(vertical = 15.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = BallropColors.White,
+                modifier = Modifier.size(21.dp)
+            )
 
-        OverlayButton(
-            text = if (hasCheckpoint) {
-                "Checkpoint'ten Yeniden Başlat"
-            } else {
-                "Baştan Başlat"
-            },
-            primary = false,
-            onClick = onRestartClick
-        )
+            Text(
+                text = text,
+                color = BallropColors.White,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Black
+            )
+        }
+    }
+}
 
-        OverlayButton(
-            text = "Ana Menü",
-            primary = false,
-            onClick = onExitToMenuClick
+@Composable
+private fun PauseSecondaryButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF0D2A63),
+                        Color(0xFF071C46),
+                        Color(0xFF04132F)
+                    )
+                )
+            )
+            .border(
+                width = 1.dp,
+                color = Color(0x552EA6FF),
+                shape = RoundedCornerShape(18.dp)
+            )
+            .clickable(onClick = onClick)
+            .padding(vertical = 13.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            color = BallropColors.TextPrimary,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
         )
     }
 }
@@ -1360,3 +1592,70 @@ private fun calculateCheckpointStartLevelForLevel(level: Int): Int {
     return checkpointBlockStart
 }
 
+@Composable
+private fun CountdownOverlay(
+    onFinished: () -> Unit
+) {
+    var count by remember { mutableIntStateOf(3) }
+    val scale = remember { Animatable(1.65f) }
+    val alpha = remember { Animatable(0f) }
+
+    LaunchedEffect(Unit) {
+        for (value in 3 downTo 1) {
+            count = value
+
+            scale.snapTo(1.65f)
+            alpha.snapTo(0f)
+
+            alpha.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = 160,
+                    easing = FastOutSlowInEasing
+                )
+            )
+
+            scale.animateTo(
+                targetValue = 0.92f,
+                animationSpec = tween(
+                    durationMillis = 690,
+                    easing = FastOutSlowInEasing
+                )
+            )
+
+            alpha.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(
+                    durationMillis = 150,
+                    easing = FastOutSlowInEasing
+                )
+            )
+        }
+
+        onFinished()
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .blur(2.dp)
+            .background(Color(0xFFFFFFF).copy(alpha = 0.10f))
+    )
+
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = count.toString(),
+            color = Color.White,
+            fontSize = 132.sp,
+            fontWeight = FontWeight.Black,
+            modifier = Modifier.graphicsLayer {
+                scaleX = scale.value
+                scaleY = scale.value
+                this.alpha = alpha.value
+            }
+        )
+    }
+}

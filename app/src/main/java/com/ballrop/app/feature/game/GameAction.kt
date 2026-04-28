@@ -1,7 +1,8 @@
 package com.ballrop.app.feature.game
-
+import com.ballrop.app.model.game.GameSceneSnapshot
 sealed interface GameAction {
     data object StartGame : GameAction
+    data object FinishCountdown : GameAction
     data object ResetGame : GameAction
     data object Tick : GameAction
     data object NextLevel : GameAction
@@ -47,6 +48,10 @@ sealed interface GameAction {
         val flowShapeConsumed: Boolean,
         val flowShapePreGapCompleted: Boolean,
         val flowShapePostGapCompleted: Boolean
+    ) : GameAction
+
+    data class StartFromSceneSnapshot(
+        val snapshot: GameSceneSnapshot
     ) : GameAction
 
     data object DebugAddLives : GameAction

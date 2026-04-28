@@ -56,12 +56,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.ballrop.app.R
 import com.ballrop.app.core.design.BallropColors
 import com.ballrop.app.core.storage.GameProgressStorage
+import androidx.compose.ui.window.Dialog
 
 @Composable
 fun HomeScreen(
@@ -115,32 +117,15 @@ fun HomeScreen(
     }
 
     if (showNewGameConfirmDialog) {
-        AlertDialog(
-            onDismissRequest = { showNewGameConfirmDialog = false },
-            title = { Text(text = "Yeni Oyun Başlat") },
-            text = {
-                Text(
-                    text = "Mevcut devam hakkın silinecek. Yeni oyun Level 1'den başlayacak."
-                )
+        NewGameConfirmDialog(
+            onDismiss = {
+                showNewGameConfirmDialog = false
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        progressStorage.clearContinueProgress()
-                        refreshProgressState()
-                        showNewGameConfirmDialog = false
-                        onStartClick()
-                    }
-                ) {
-                    Text(text = "Başlat")
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { showNewGameConfirmDialog = false }
-                ) {
-                    Text(text = "Vazgeç")
-                }
+            onConfirm = {
+                progressStorage.clearContinueProgress()
+                refreshProgressState()
+                showNewGameConfirmDialog = false
+                onStartClick()
             }
         )
     }
@@ -189,6 +174,18 @@ fun HomeScreen(
                     .navigationBarsPadding()
                     .padding(horizontal = sidePadding, vertical = 12.dp)
             ) {
+                Text(
+                    text = "RİTMİ YAKALA,\nDOĞRU SEPETE GÖNDER!",
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 202.dp),
+                    color = Color(0xFFB9D9FF),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Normal,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 23.sp
+                )
+
                 HomePanel(
                     modifier = Modifier
                         .align(Alignment.Center)
@@ -242,26 +239,8 @@ private fun HomePanel(
     Box(
         modifier = modifier
             .clip(shape)
-            .background(
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xF402163C),
-                        Color(0xF0011331),
-                        Color(0xF3000C24)
-                    )
-                )
-            )
-            .border(
-                width = 1.4.dp,
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF0E8CFF),
-                        Color(0x802A7FFF),
-                        Color(0x66106BFF)
-                    )
-                ),
-                shape = shape
-            )
+
+
     ) {
         Column(
             modifier = Modifier
@@ -296,6 +275,7 @@ private fun HomePanel(
 
             StartGameButton(
                 text = if (canContinue) "Yeni Oyun Başlat" else "Oyuna Başla",
+                compact = canContinue,
                 onClick = onStartClick
             )
 
@@ -525,6 +505,7 @@ private fun NeonActionCard(
     icon: ImageVector,
     iconGlowColor: Color,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
     onClick: () -> Unit
 ) {
     val shape = RoundedCornerShape(22.dp)
@@ -554,7 +535,10 @@ private fun NeonActionCard(
                 shape = shape
             )
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp)
+            .padding(
+                horizontal = if (compact) 14.dp else 16.dp,
+                vertical = if (compact) 10.dp else 14.dp
+            )
     ) {
         Box(
             modifier = Modifier
@@ -584,7 +568,7 @@ private fun NeonActionCard(
         ) {
             Box(
                 modifier = Modifier
-                    .size(52.dp)
+                    .size(if (compact) 44.dp else 52.dp)
                     .clip(CircleShape)
                     .background(
                         brush = Brush.radialGradient(
@@ -606,7 +590,7 @@ private fun NeonActionCard(
                     imageVector = icon,
                     contentDescription = null,
                     tint = Color.White,
-                    modifier = Modifier.size(26.dp)
+                    modifier = Modifier.size(if (compact) 22.dp else 26.dp)
                 )
             }
 
@@ -617,7 +601,11 @@ private fun NeonActionCard(
             ) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = if (compact) {
+                        MaterialTheme.typography.titleSmall
+                    } else {
+                        MaterialTheme.typography.titleMedium
+                    },
                     color = BallropColors.TextPrimary,
                     fontWeight = FontWeight.Bold
                 )
@@ -657,6 +645,7 @@ private fun ContinueGameButton(
 @Composable
 private fun StartGameButton(
     text: String,
+    compact: Boolean,
     onClick: () -> Unit
 ) {
     NeonActionCard(
@@ -664,6 +653,7 @@ private fun StartGameButton(
         subtitle = "Yeni bir oyun akışı başlat",
         icon = Icons.Filled.PlayArrow,
         iconGlowColor = Color(0xFF31A8FF),
+        compact = compact,
         onClick = onClick
     )
 }
@@ -714,6 +704,169 @@ private fun QuickInfoCard(
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = BallropColors.TextSecondary
+            )
+        }
+    }
+}
+
+@Composable
+private fun NewGameConfirmDialog(
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(28.dp))
+                .background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xF70A2C67),
+                            Color(0xF7061B46),
+                            Color(0xF702102D)
+                        )
+                    )
+                )
+                .border(
+                    width = 1.3.dp,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFF2EA6FF),
+                            Color(0xAA1B7CFF),
+                            Color(0x66305CFF)
+                        )
+                    ),
+                    shape = RoundedCornerShape(28.dp)
+                )
+                .padding(20.dp)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(66.dp)
+                        .clip(CircleShape)
+                        .background(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    Color(0x5531A8FF),
+                                    Color(0x2200D1FF),
+                                    Color(0xFF071A3D)
+                                )
+                            )
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = Color(0xAA2EA6FF),
+                            shape = CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.PlayArrow,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(34.dp)
+                    )
+                }
+
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Yeni Oyun Başlatılsın mı?",
+                        color = BallropColors.TextPrimary,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Black,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Text(
+                        text = "Mevcut devam hakkın silinecek.\nYeni oyun Level 1 • Bölüm 1/3 noktasından başlayacak.",
+                        color = BallropColors.TextSecondary,
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center,
+                        lineHeight = MaterialTheme.typography.bodyMedium.lineHeight
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    DialogActionButton(
+                        text = "Vazgeç",
+                        icon = Icons.Filled.Refresh,
+                        glowColor = Color(0xFF21E38A),
+                        modifier = Modifier.weight(1f),
+                        onClick = onDismiss
+                    )
+
+                    DialogActionButton(
+                        text = "Başlat",
+                        icon = Icons.Filled.PlayArrow,
+                        glowColor = Color(0xFF31A8FF),
+                        modifier = Modifier.weight(1f),
+                        onClick = onConfirm
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DialogActionButton(
+    text: String,
+    icon: ImageVector,
+    glowColor: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF0D2A63),
+                        Color(0xFF071C46),
+                        Color(0xFF04132F)
+                    )
+                )
+            )
+            .border(
+                width = 1.dp,
+                color = glowColor.copy(alpha = 0.65f),
+                shape = RoundedCornerShape(18.dp)
+            )
+            .clickable(onClick = onClick)
+            .padding(vertical = 13.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(19.dp)
+            )
+
+            Text(
+                text = text,
+                color = Color.White,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold
             )
         }
     }

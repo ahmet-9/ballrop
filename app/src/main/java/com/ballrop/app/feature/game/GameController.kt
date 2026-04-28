@@ -29,6 +29,8 @@ import kotlin.math.sin
 import kotlin.random.Random
 import com.ballrop.app.feature.game.flow.GameFlowSnapshot
 
+import com.ballrop.app.model.game.GameSceneSnapshot
+
 class GameController {
 
     var uiState by mutableStateOf(GameUiState())
@@ -62,9 +64,62 @@ class GameController {
     private var basketSwayDirection = 1f
     private var basketSwapState = false
     private var lastSwapThreshold = 0
+    private var restoredScenePending = false
 
     fun currentFlowSnapshot(): GameFlowSnapshot {
         return ensureFlowEngine().exportSnapshot()
+    }
+
+    fun currentSceneSnapshot(): GameSceneSnapshot {
+        val now = System.currentTimeMillis()
+        val flowSnapshot = currentFlowSnapshot()
+
+        return GameSceneSnapshot(
+            level = uiState.currentLevel,
+            part = uiState.currentPart,
+
+            score = uiState.score,
+            correctPlacedCount = uiState.correctPlacedCount,
+            totalCorrectCount = uiState.totalCorrectCount,
+            missedCount = uiState.missedCount,
+            wrongCount = uiState.wrongCount,
+            comboCount = uiState.comboCount,
+            bestCombo = uiState.bestCombo,
+
+            maxMistakesAllowed = uiState.maxMistakesAllowed,
+            targetCorrectCount = uiState.targetCorrectCountForActivePart,
+
+            canvasWidth = uiState.canvasWidth,
+            canvasHeight = uiState.canvasHeight,
+
+            balls = uiState.balls.map { it.copy(isDragging = false) },
+            baskets = uiState.baskets,
+
+            activeShapeBallIds = uiState.activeShapeBallIds,
+            shapeRemainingCount = uiState.shapeRemainingCount,
+            shapeTotalCount = uiState.shapeTotalCount,
+            isShapeActive = uiState.isShapeActive,
+
+            nextBallId = nextBallId,
+            nextPopupId = nextPopupId,
+            nextFeedbackEventId = nextFeedbackEventId,
+
+            lastSpawnAgeMillis = if (lastSpawnTimeMillis > 0L) now - lastSpawnTimeMillis else 0L,
+            lastCorrectCatchAgeMillis = if (lastCorrectCatchMillis > 0L) now - lastCorrectCatchMillis else 0L,
+            slowMotionRemainingMillis = (slowMotionUntilMillis - now).coerceAtLeast(0L),
+            shapeCooldownRemainingMillis = (shapePostClearCooldownUntilMillis - now).coerceAtLeast(0L),
+
+            flowBlockIndex = flowSnapshot.currentBlockIndex,
+            flowBlockSpawnCount = flowSnapshot.currentBlockSpawnCount,
+            flowShapeConsumed = flowSnapshot.shapeConsumedForCurrentBlock,
+            flowShapePreGapCompleted = flowSnapshot.shapePreGapCompleted,
+            flowShapePostGapCompleted = flowSnapshot.shapePostGapCompleted,
+
+            basketSwayOffset = basketSwayOffset,
+            basketSwayDirection = basketSwayDirection,
+            basketSwapState = basketSwapState,
+            lastSwapThreshold = lastSwapThreshold
+        )
     }
 
     fun onAction(action: GameAction) {
@@ -79,17 +134,43 @@ class GameController {
                 }
 
                 levelStartTimeMillis = now
-                lastSpawnTimeMillis = now
+
+                if (!restoredScenePending) {
+                    lastSpawnTimeMillis = now
+                }
+
                 if (flowEngine == null) {
                     flowEngine = GameFlowEngine(partConfig)
                 }
 
                 uiState = uiState.copy(
-                    status = GameStatus.PLAYING,
+                    status = GameStatus.COUNTDOWN,
                     levelConfig = levelConfig,
                     maxMistakesAllowed = partConfig.maxMistakesAllowed,
-                    baskets = snapBasketsToMotionStart(uiState.baskets)
+                    baskets = if (restoredScenePending) {
+                        uiState.baskets
+                    } else {
+                        snapBasketsToMotionStart(uiState.baskets)
+                    }
                 )
+                restoredScenePending = false
+            }
+
+            GameAction.FinishCountdown -> {
+                if (uiState.status == GameStatus.COUNTDOWN) {
+                    val now = System.currentTimeMillis()
+
+                    if (sessionStartTimeMillis == 0L) {
+                        sessionStartTimeMillis = now
+                    }
+
+                    levelStartTimeMillis = now
+                    lastSpawnTimeMillis = now
+
+                    uiState = uiState.copy(
+                        status = GameStatus.PLAYING
+                    )
+                }
             }
 
             GameAction.ResetGame -> {
@@ -132,8 +213,14 @@ class GameController {
 
             GameAction.ResumeGame -> {
                 if (uiState.status == GameStatus.PAUSED) {
-                    lastSpawnTimeMillis = System.currentTimeMillis()
-                    uiState = uiState.copy(status = GameStatus.PLAYING)
+                    draggingBallId = null
+                    dragTouchOffsetX = 0f
+                    dragTouchOffsetY = 0f
+
+                    uiState = uiState.copy(
+                        balls = uiState.balls.map { it.copy(isDragging = false) },
+                        status = GameStatus.COUNTDOWN
+                    )
                 }
             }
 
@@ -221,6 +308,9 @@ class GameController {
                         shapePostGapCompleted = action.flowShapePostGapCompleted
                     )
                 )
+            }
+            is GameAction.StartFromSceneSnapshot -> {
+                restoreSceneSnapshot(action.snapshot)
             }
         }
     }
@@ -1097,7 +1187,7 @@ class GameController {
             baskets = snapBasketsToMotionStart(
                 rebuiltBaskets.map { it.copy(glowAlpha = 0f) }
             ),
-            status = GameStatus.PLAYING
+            status = GameStatus.COUNTDOWN
         )
     }
 
@@ -2004,6 +2094,102 @@ class GameController {
             canvasWidth = preservedWidth,
             canvasHeight = preservedHeight,
             baskets = preservedBaskets
+        )
+    }
+
+    private fun restoreSceneSnapshot(snapshot: GameSceneSnapshot) {
+        val now = System.currentTimeMillis()
+
+        val safeLevel = snapshot.level.coerceAtLeast(1)
+        val newLevelConfig = currentLevelConfig(safeLevel)
+        val safePart = snapshot.part.coerceIn(1, newLevelConfig.parts.size.coerceAtLeast(1))
+        val partConfig = newLevelConfig.partOrFirst(safePart)
+
+        val lanes = if (snapshot.canvasWidth > 0f && snapshot.canvasHeight > 0f) {
+            createBaskets(
+                width = snapshot.canvasWidth,
+                height = snapshot.canvasHeight,
+                colorCount = partConfig.colorCount
+            )
+        } else {
+            emptyList()
+        }
+
+        basketLeftLane = lanes.getOrNull(0)
+        basketRightLane = lanes.getOrNull(1)
+
+        nextBallId = snapshot.nextBallId.coerceAtLeast(
+            (snapshot.balls.maxOfOrNull { it.id } ?: -1L) + 1L
+        )
+        nextPopupId = snapshot.nextPopupId
+        nextFeedbackEventId = snapshot.nextFeedbackEventId
+
+        lastSpawnTimeMillis = now - snapshot.lastSpawnAgeMillis.coerceAtLeast(0L)
+        lastCorrectCatchMillis = if (snapshot.lastCorrectCatchAgeMillis > 0L) {
+            now - snapshot.lastCorrectCatchAgeMillis
+        } else {
+            0L
+        }
+
+        lastPointerX = 0f
+        lastPointerY = 0f
+        lastDragDeltaX = 0f
+        lastDragDeltaY = 0f
+        dragTouchOffsetX = 0f
+        dragTouchOffsetY = 0f
+        draggingBallId = null
+
+        slowMotionUntilMillis = now + snapshot.slowMotionRemainingMillis.coerceAtLeast(0L)
+        shapePostClearCooldownUntilMillis = now + snapshot.shapeCooldownRemainingMillis.coerceAtLeast(0L)
+
+        basketSwayOffset = snapshot.basketSwayOffset
+        basketSwayDirection = if (snapshot.basketSwayDirection == 0f) 1f else snapshot.basketSwayDirection
+        basketSwapState = snapshot.basketSwapState
+        lastSwapThreshold = snapshot.lastSwapThreshold
+
+        flowEngine = GameFlowEngine(
+            partConfig = partConfig,
+            snapshot = GameFlowSnapshot(
+                currentBlockIndex = snapshot.flowBlockIndex,
+                currentBlockSpawnCount = snapshot.flowBlockSpawnCount,
+                shapeConsumedForCurrentBlock = snapshot.flowShapeConsumed,
+                shapePreGapCompleted = snapshot.flowShapePreGapCompleted,
+                shapePostGapCompleted = snapshot.flowShapePostGapCompleted
+            )
+        )
+
+        restoredScenePending = true
+
+        uiState = GameUiState(
+            score = snapshot.score,
+            correctPlacedCount = snapshot.correctPlacedCount.coerceIn(0, partConfig.targetCorrectCount),
+            totalCorrectCount = snapshot.totalCorrectCount.coerceAtLeast(0),
+            missedCount = snapshot.missedCount.coerceAtLeast(0),
+            wrongCount = snapshot.wrongCount.coerceAtLeast(0),
+            currentLevel = safeLevel,
+            currentPart = safePart,
+            status = GameStatus.READY,
+            levelConfig = newLevelConfig,
+            maxMistakesAllowed = snapshot.maxMistakesAllowed.coerceAtLeast(1),
+
+            comboCount = snapshot.comboCount.coerceAtLeast(0),
+            bestCombo = snapshot.bestCombo.coerceAtLeast(0),
+
+            canvasWidth = snapshot.canvasWidth,
+            canvasHeight = snapshot.canvasHeight,
+
+            shapeTotalCount = snapshot.shapeTotalCount.coerceAtLeast(0),
+
+            baskets = snapshot.baskets,
+            balls = snapshot.balls.map { it.copy(isDragging = false) },
+
+            activeShapeBallIds = snapshot.activeShapeBallIds,
+            shapeRemainingCount = snapshot.shapeRemainingCount.coerceAtLeast(0),
+            isShapeActive = snapshot.isShapeActive,
+
+            feedbackPopups = emptyList(),
+            feedbackEvents = emptyList(),
+            impactOverlay = null
         )
     }
 
